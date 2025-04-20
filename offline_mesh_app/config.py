@@ -11,7 +11,26 @@ DISCOVERY_INTERVAL = 30  # seconds
 
 # Node identification
 MY_ID = str(uuid.uuid4())[:8]  # Generate a unique ID for this node
-MY_IP = socket.gethostbyname(socket.gethostname())
+
+# Get the most reliable IP address
+def get_best_ip():
+    """Attempt to get the most appropriate IP address"""
+    try:
+        # First try to get the IP used for external connections
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 53))  # Google's DNS
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        try:
+            # Fall back to hostname-based approach
+            return socket.gethostbyname(socket.gethostname())
+        except:
+            # Last resort fallback
+            return "127.0.0.1"
+
+MY_IP = get_best_ip()
 
 # Network peers
 KNOWN_PEERS = []  # Will be populated through discovery

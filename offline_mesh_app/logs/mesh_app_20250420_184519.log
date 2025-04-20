@@ -1,0 +1,96 @@
+2025-04-20 18:45:19,480 - network - INFO - Starting Offline Mesh Network Application
+2025-04-20 18:45:19,559 - network - INFO - Starting TCP server...
+2025-04-20 18:45:19,559 - routing - INFO - Starting routing protocol...
+2025-04-20 18:45:19,560 - network - INFO - Server listening on port 5000 with IP 169.254.241.170
+2025-04-20 18:45:19,560 - network - INFO - Starting peer discovery...
+2025-04-20 18:45:19,560 - network - INFO - Ready to accept connections from other peers
+2025-04-20 18:45:19,561 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:45:19,562 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:45:19,562 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:45:19,916 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:45:20,562 - network - INFO - Starting GUI application...
+2025-04-20 18:45:35,807 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:45:35,808 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:45:35,809 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:45:36,027 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:45:41,529 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:45:41,530 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:45:41,531 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:45:41,797 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:45:44,303 - network - INFO - New connection established from 192.168.137.209:52917
+2025-04-20 18:45:44,304 - network - INFO - Received connection from 192.168.137.209:52917
+2025-04-20 18:45:44,304 - network - WARNING - Empty data received from 192.168.137.209
+2025-04-20 18:45:49,341 - network - INFO - New connection established from 192.168.137.209:53218
+2025-04-20 18:45:49,342 - network - INFO - Received connection from 192.168.137.209:53218
+2025-04-20 18:45:49,342 - network - WARNING - Empty data received from 192.168.137.209
+2025-04-20 18:45:49,917 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:45:49,918 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:45:49,919 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:45:50,172 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:45:51,091 - network - INFO - New connection established from 192.168.137.209:53433
+2025-04-20 18:45:51,092 - network - INFO - Received connection from 192.168.137.209:53433
+2025-04-20 18:45:51,155 - routing - INFO - Routing NEW_NEIGHBOR from d063094c: IP: 192.168.137.209
+2025-04-20 18:45:51,156 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:45:54,266 - network - INFO - New connection established from 192.168.137.209:53732
+2025-04-20 18:45:54,267 - network - INFO - Received connection from 192.168.137.209:53732
+2025-04-20 18:45:54,327 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:45:56,657 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:45:56,658 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:45:56,659 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:45:56,952 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:46:02,324 - network - INFO - New connection established from 192.168.137.209:53947
+2025-04-20 18:46:02,325 - network - INFO - Received connection from 192.168.137.209:53947
+2025-04-20 18:46:02,343 - network - WARNING - Empty data received from 192.168.137.209
+2025-04-20 18:46:04,311 - network - INFO - New connection established from 192.168.137.209:49691
+2025-04-20 18:46:04,312 - network - INFO - Received connection from 192.168.137.209:49691
+2025-04-20 18:46:04,314 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:46:14,317 - network - INFO - New connection established from 192.168.137.209:57986
+2025-04-20 18:46:14,318 - network - INFO - Received connection from 192.168.137.209:57986
+2025-04-20 18:46:14,342 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:46:15,449 - network - INFO - New connection established from 192.168.137.209:58093
+2025-04-20 18:46:15,450 - network - INFO - Received connection from 192.168.137.209:58093
+2025-04-20 18:46:15,450 - network - WARNING - Empty data received from 192.168.137.209
+2025-04-20 18:46:20,173 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:46:20,175 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:46:20,175 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:46:20,435 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:46:21,164 - network - INFO - New connection established from 192.168.137.209:58438
+2025-04-20 18:46:21,165 - network - INFO - Received connection from 192.168.137.209:58438
+2025-04-20 18:46:21,165 - network - WARNING - Empty data received from 192.168.137.209
+2025-04-20 18:46:24,347 - network - INFO - New connection established from 192.168.137.209:58752
+2025-04-20 18:46:24,348 - network - INFO - Received connection from 192.168.137.209:58752
+2025-04-20 18:46:24,349 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:46:34,366 - network - INFO - New connection established from 192.168.137.209:59124
+2025-04-20 18:46:34,367 - network - INFO - Received connection from 192.168.137.209:59124
+2025-04-20 18:46:34,389 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:46:44,409 - network - INFO - New connection established from 192.168.137.209:59134
+2025-04-20 18:46:44,410 - network - INFO - Received connection from 192.168.137.209:59134
+2025-04-20 18:46:44,411 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:46:50,436 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:46:50,438 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:46:50,438 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:46:50,642 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:46:54,455 - network - INFO - New connection established from 192.168.137.209:59144
+2025-04-20 18:46:54,456 - network - INFO - Received connection from 192.168.137.209:59144
+2025-04-20 18:46:54,456 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:46:57,830 - network - INFO - New connection established from 192.168.137.209:59148
+2025-04-20 18:46:57,830 - network - INFO - Received connection from 192.168.137.209:59148
+2025-04-20 18:46:57,830 - network - WARNING - Empty data received from 192.168.137.209
+2025-04-20 18:47:04,470 - network - INFO - New connection established from 192.168.137.209:59567
+2025-04-20 18:47:04,471 - network - INFO - Received connection from 192.168.137.209:59567
+2025-04-20 18:47:04,472 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:47:14,505 - network - INFO - New connection established from 192.168.137.209:59670
+2025-04-20 18:47:14,506 - network - INFO - Received connection from 192.168.137.209:59670
+2025-04-20 18:47:14,523 - routing - INFO - Routing ROUTE_UPDATE from d063094c: Via 192.168.137.209, TTL: 2
+2025-04-20 18:47:20,644 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:47:20,645 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:47:20,646 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:47:20,861 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:47:47,385 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:47:47,386 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:47:47,387 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:47:47,771 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:47:50,862 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:47:50,864 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:47:50,865 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:47:51,266 - routing - INFO - No new peers discovered. Current peers: None

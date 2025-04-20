@@ -1,0 +1,23 @@
+2025-04-20 18:48:05,988 - network - INFO - Starting Offline Mesh Network Application
+2025-04-20 18:48:06,071 - network - INFO - Starting TCP server...
+2025-04-20 18:48:06,071 - network - INFO - Server listening on port 5000 with IP 169.254.241.170
+2025-04-20 18:48:06,071 - routing - INFO - Starting routing protocol...
+2025-04-20 18:48:06,072 - network - INFO - Ready to accept connections from other peers
+2025-04-20 18:48:06,072 - network - INFO - Starting peer discovery...
+2025-04-20 18:48:06,073 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:48:06,074 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:48:06,074 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:48:06,346 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:48:07,073 - network - INFO - Starting GUI application...
+2025-04-20 18:48:14,013 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:48:14,015 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:48:14,016 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:48:14,350 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:48:33,107 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:48:33,108 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:48:33,109 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:48:33,451 - routing - INFO - No new peers discovered. Current peers: None
+2025-04-20 18:48:36,347 - routing - ERROR - Failed to get subnet: [WinError 10051] A socket operation was attempted to an unreachable network
+2025-04-20 18:48:36,348 - routing - INFO - Scanning subnet 192.168.1.0/24 (254 hosts)
+2025-04-20 18:48:36,348 - routing - INFO - My IP is 169.254.241.170, will not scan self
+2025-04-20 18:48:36,706 - routing - INFO - No new peers discovered. Current peers: None
