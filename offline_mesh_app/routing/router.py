@@ -1,8 +1,9 @@
 import time
 import json
 import threading
+import uuid
 from config import MY_ID, MY_IP, KNOWN_PEERS, MAX_TTL, ROUTING_TIMEOUT
-from utils.logger import log_routing
+from utils.logger import log_routing, routing_logger
 
 class Router:
     def __init__(self):
@@ -10,7 +11,9 @@ class Router:
         self.sequence_numbers = {}  # {node_id: latest_sequence_number}
         self.neighbors = set()  # Direct neighbors (1-hop)
         self.message_ids_seen = set()  # Track message IDs to prevent loops
+        self.secondary_routes = {}  # Backup routes for resilience
         self.lock = threading.RLock()  # Lock for thread safety
+        self.bridge_nodes = set()  # Nodes that can bridge between networks
     
     def update_link_state(self, sender_id, sender_ip, link_state, seq_num, ttl):
         """Update routing table with new link state information"""
@@ -23,6 +26,12 @@ class Router:
             # Check if this is a newer update
             if sender_id not in self.sequence_numbers or seq_num > self.sequence_numbers[sender_id]:
                 self.sequence_numbers[sender_id] = seq_num
+                
+                # Extract any bridging information from the link state
+                if "bridges" in link_state and link_state["bridges"]:
+                    # This node connects to multiple networks - mark it as a bridge
+                    self.bridge_nodes.add(sender_id)
+                    routing_logger.info(f"Node {sender_id} identified as a bridge between networks")
                 
                 # Update routing information
                 for node, routes in link_state.items():
@@ -40,11 +49,16 @@ class Router:
                         
                         # Update or add routing entry
                         if node not in self.routing_table or self.routing_table[node]["seq"] < routes["seq"]:
+                            # Record the old route as a secondary if it exists
+                            if node in self.routing_table:
+                                self.secondary_routes[node] = self.routing_table[node].copy()
+                            
                             self.routing_table[node] = {
                                 "next_hop": next_hop,
                                 "ttl": new_ttl,
                                 "seq": routes["seq"],
-                                "timestamp": time.time()
+                                "timestamp": time.time(),
+                                "via_bridge": sender_id in self.bridge_nodes
                             }
                             log_routing(node, "ROUTE_UPDATE", f"Via {next_hop}, TTL: {new_ttl}")
                 
@@ -61,10 +75,14 @@ class Router:
             my_seq = self.sequence_numbers.get(MY_ID, 0) + 1
             self.sequence_numbers[MY_ID] = my_seq
             
+            # Determine if we're a bridge between networks
+            is_bridge = self.detect_bridge_status()
+            
             link_state[MY_ID] = {
                 "ip": MY_IP,
                 "seq": my_seq,
-                "neighbors": list(self.neighbors)
+                "neighbors": list(self.neighbors),
+                "bridges": is_bridge
             }
             
             # Add information about other nodes we know
@@ -77,6 +95,21 @@ class Router:
                     }
             
             return link_state
+    
+    def detect_bridge_status(self):
+        """Detect if this node bridges between networks"""
+        # Check if we connect to nodes on different subnets
+        network_prefixes = set()
+        for neighbor in self.neighbors:
+            # Extract the network prefix (first two octets as a simple heuristic)
+            prefix = '.'.join(neighbor.split('.')[:2])
+            network_prefixes.add(prefix)
+        
+        # If we connect to multiple networks, we're a bridge
+        is_bridge = len(network_prefixes) > 1
+        if is_bridge:
+            routing_logger.info(f"This node is a bridge between networks: {', '.join(network_prefixes)}")
+        return is_bridge
     
     def get_next_hop(self, destination_id):
         """Get the next hop for a given destination"""
@@ -93,8 +126,40 @@ class Router:
                 if time.time() - route["timestamp"] <= ROUTING_TIMEOUT:
                     return route["next_hop"]
             
-            # If we don't have a valid route, return all neighbors for flooding
-            return list(self.neighbors)
+            # If we don't have a valid primary route, check secondary routes
+            if destination_id in self.secondary_routes:
+                sec_route = self.secondary_routes[destination_id]
+                if time.time() - sec_route["timestamp"] <= ROUTING_TIMEOUT * 1.5:  # Give secondary routes longer validity
+                    routing_logger.info(f"Using secondary route to {destination_id} via {sec_route['next_hop']}")
+                    return sec_route["next_hop"]
+            
+            # Check if any bridge nodes can help reach the destination
+            if self.bridge_nodes:
+                routing_logger.info(f"No direct route to {destination_id}, checking bridge nodes: {self.bridge_nodes}")
+                for bridge_id in self.bridge_nodes:
+                    if bridge_id in self.routing_table:
+                        bridge_route = self.routing_table[bridge_id]
+                        if time.time() - bridge_route["timestamp"] <= ROUTING_TIMEOUT:
+                            routing_logger.info(f"Routing via bridge node {bridge_id} at {bridge_route['next_hop']}")
+                            return bridge_route["next_hop"]
+            
+            # If we don't have any specific route, return all neighbors for flooding
+            all_neighbors = list(self.neighbors)
+            
+            # Prioritize bridges for flooding if no specific route
+            bridge_neighbors = []
+            for neighbor_ip in all_neighbors:
+                for node_id, route in self.routing_table.items():
+                    if route["next_hop"] == neighbor_ip and route.get("via_bridge", False):
+                        bridge_neighbors.append(neighbor_ip)
+                        break
+            
+            if bridge_neighbors:
+                routing_logger.info(f"No specific route, but found bridge neighbors to try: {bridge_neighbors}")
+                return bridge_neighbors
+            
+            routing_logger.info(f"No specific route, flooding to all neighbors: {all_neighbors}")
+            return all_neighbors
     
     def get_all_routes(self):
         """Get all active routes in the routing table"""
@@ -108,7 +173,8 @@ class Router:
                     active_routes[node_id] = {
                         "next_hop": route["next_hop"],
                         "ttl": route["ttl"],
-                        "age": int(current_time - route["timestamp"])
+                        "age": int(current_time - route["timestamp"]),
+                        "via_bridge": route.get("via_bridge", False)
                     }
             
             return active_routes
@@ -131,8 +197,9 @@ class Router:
             if len(self.message_ids_seen) > 1000:
                 # Remove oldest 20% of entries
                 to_remove = int(len(self.message_ids_seen) * 0.2)
-                for _ in range(to_remove):
-                    self.message_ids_seen.pop()
+                oldest = list(self.message_ids_seen)[:to_remove]
+                for msg_id in oldest:
+                    self.message_ids_seen.remove(msg_id)
             
             return True
     
@@ -145,10 +212,30 @@ class Router:
             for node_id, route in self.routing_table.items():
                 if current_time - route["timestamp"] > ROUTING_TIMEOUT:
                     stale_nodes.append(node_id)
+                    # Move to secondary routes before removing
+                    self.secondary_routes[node_id] = route.copy()
             
             for node_id in stale_nodes:
                 del self.routing_table[node_id]
                 log_routing(node_id, "ROUTE_EXPIRED")
+            
+            # Also clean up very old secondary routes
+            stale_secondary = []
+            for node_id, route in self.secondary_routes.items():
+                if current_time - route["timestamp"] > ROUTING_TIMEOUT * 3:  # Keep secondary routes longer
+                    stale_secondary.append(node_id)
+            
+            for node_id in stale_secondary:
+                del self.secondary_routes[node_id]
+            
+            # Update bridge nodes set
+            stale_bridges = []
+            for bridge_id in self.bridge_nodes:
+                if bridge_id not in self.routing_table and bridge_id not in self.secondary_routes:
+                    stale_bridges.append(bridge_id)
+            
+            for bridge_id in stale_bridges:
+                self.bridge_nodes.remove(bridge_id)
             
             return len(stale_nodes)
 

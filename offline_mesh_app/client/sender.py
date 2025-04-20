@@ -33,8 +33,8 @@ def send_file_to_peer(ip, file_path):
         print(f"[ERROR] Could not send file to {ip}: {e}")
 
 
-def send_to_peer(ip, data, retry=1):
-    """Send data to a specific peer"""
+def send_to_peer(ip, data, retry=3):
+    """Send data to a specific peer with enhanced retry logic"""
     for attempt in range(retry + 1):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -50,9 +50,12 @@ def send_to_peer(ip, data, retry=1):
             return True
         except Exception as e:
             if attempt < retry:
-                time.sleep(1)  # Wait before retry
+                # Increasing backoff time between retries
+                backoff_time = (attempt + 1) * 1.5
+                network_logger.warning(f"Failed to send to {ip}, retrying in {backoff_time}s (attempt {attempt+1}/{retry}): {e}")
+                time.sleep(backoff_time)  # Increasing backoff
             else:
-                network_logger.error(f"Failed to send to {ip}: {e}")
+                network_logger.error(f"Failed to send to {ip} after {retry} retries: {e}")
                 return False
 
 def send_message(destination_id, content, message_type="text"):
@@ -70,7 +73,9 @@ def send_message(destination_id, content, message_type="text"):
         "content": content,
         "message_type": message_type,
         "ttl": MAX_TTL,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "hops": [],  # Track the path the message takes
+        "multi_hop": True  # Flag to indicate this is for a multi-hop network
     }
     
     # Convert to JSON
@@ -87,17 +92,48 @@ def send_message(destination_id, content, message_type="text"):
     
     # If no specific route, send to all neighbors
     if isinstance(next_hop, list):
+        if not next_hop:
+            network_logger.warning(f"No neighbors available to send message to {destination_id}")
+            return False
+            
         network_logger.info(f"No direct route to {destination_id}, flooding to {len(next_hop)} neighbors")
         success = False
+        
+        # Try bridge nodes first if available
+        bridge_attempts = []
+        regular_attempts = []
+        
+        # Separate bridge nodes from regular nodes
         for ip in next_hop:
-            if send_to_peer(ip, encrypted_data):
+            for node_id, route in router.get_all_routes().items():
+                if route["next_hop"] == ip and route.get("via_bridge", False):
+                    bridge_attempts.append(ip)
+                    break
+            else:
+                regular_attempts.append(ip)
+        
+        # Log the strategy
+        if bridge_attempts:
+            network_logger.info(f"Trying {len(bridge_attempts)} bridge nodes first: {bridge_attempts}")
+        
+        # First try bridge nodes
+        for ip in bridge_attempts:
+            if send_to_peer(ip, encrypted_data, retry=2):
+                network_logger.info(f"Successfully sent via bridge node {ip}")
                 success = True
+        
+        # If bridge nodes failed or don't exist, try all regular nodes
+        if not success:
+            for ip in regular_attempts:
+                if send_to_peer(ip, encrypted_data):
+                    success = True
+        
         return success
     
     # If we have a specific next hop, send there
     elif next_hop:
         network_logger.info(f"Sending message to {destination_id} via {next_hop}")
-        return send_to_peer(next_hop, encrypted_data)
+        return send_to_peer(next_hop, encrypted_data, retry=2)
     
     # If destination is ourselves or no route available
     else:
@@ -118,7 +154,9 @@ def broadcast_message(content, message_type="text"):
         "content": content,
         "message_type": message_type,
         "ttl": MAX_TTL,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "hops": [],  # Track the path the message takes
+        "multi_hop": True  # Flag to indicate this is for a multi-hop network
     }
     
     # Convert to JSON
@@ -137,7 +175,7 @@ def broadcast_message(content, message_type="text"):
     network_logger.info(f"Broadcasting message to {len(neighbors)} neighbors")
     
     for ip in neighbors:
-        if send_to_peer(ip, encrypted_data):
+        if send_to_peer(ip, encrypted_data, retry=1):
             success_count += 1
     
     return success_count > 0
@@ -172,7 +210,8 @@ def send_file(destination_id, file_path):
                 "filesize": filesize,
                 "total_chunks": num_chunks,
                 "ttl": MAX_TTL,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "multi_hop": True  # Flag to indicate this is for a multi-hop network
             }
             
             # Convert to JSON and encrypt
@@ -188,11 +227,26 @@ def send_file(destination_id, file_path):
                 return False
             
             # If multiple routes, choose first one for file transfer
+            # Prioritize bridge nodes for multi-hop networks
             if isinstance(next_hop, list):
-                next_hop = next_hop[0] if next_hop else None
+                # Look for bridge nodes
+                bridge_ip = None
+                for ip in next_hop:
+                    for node_id, route in router.get_all_routes().items():
+                        if route["next_hop"] == ip and route.get("via_bridge", False):
+                            bridge_ip = ip
+                            break
+                    if bridge_ip:
+                        break
+                
+                if bridge_ip:
+                    network_logger.info(f"Using bridge node {bridge_ip} for file transfer")
+                    next_hop = bridge_ip
+                else:
+                    next_hop = next_hop[0] if next_hop else None
             
             # Send file info
-            if not send_to_peer(next_hop, encrypted_data):
+            if not send_to_peer(next_hop, encrypted_data, retry=3):
                 network_logger.error(f"Failed to send file info to {destination_id}")
                 return False
             
@@ -215,7 +269,8 @@ def send_file(destination_id, file_path):
                         "total_chunks": num_chunks,
                         "data": encoded_chunk,
                         "ttl": MAX_TTL,
-                        "timestamp": time.time()
+                        "timestamp": time.time(),
+                        "multi_hop": True  # Flag to indicate this is for a multi-hop network
                     }
                     
                     # Convert to JSON and encrypt
@@ -223,7 +278,7 @@ def send_file(destination_id, file_path):
                     encrypted_data = encrypt_data(json_data)
                     
                     # Send chunk with retry
-                    if not send_to_peer(next_hop, encrypted_data, retry=2):
+                    if not send_to_peer(next_hop, encrypted_data, retry=3):
                         network_logger.error(f"Failed to send chunk {chunk_index} to {destination_id}")
                         success = False
                         break
@@ -259,6 +314,11 @@ def forward_packet(packet, received_from):
         # Update TTL in packet
         packet["ttl"] = ttl
         
+        # Add ourselves to the hop list if this is a multi-hop packet
+        if packet.get("multi_hop") and "hops" in packet:
+            if MY_ID not in packet["hops"]:
+                packet["hops"].append(MY_ID)
+        
         # Handle different packet types
         if packet_type == "message":
             dest_id = packet.get("dst", "")
@@ -280,8 +340,20 @@ def forward_packet(packet, received_from):
                 if received_from in next_hop:
                     next_hop.remove(received_from)
             elif next_hop == received_from:
-                # No alternative route
-                return False
+                # Check for alternative routes via bridge nodes
+                bridge_routes = []
+                for bridge_id in router.bridge_nodes:
+                    if bridge_id in router.routing_table:
+                        bridge_route = router.routing_table[bridge_id]
+                        if bridge_route["next_hop"] != received_from:
+                            bridge_routes.append(bridge_route["next_hop"])
+                
+                if bridge_routes:
+                    network_logger.info(f"Using alternative bridge route for {dest_id}: {bridge_routes}")
+                    next_hop = bridge_routes
+                else:
+                    # No alternative route
+                    return False
             
             # Forward packet
             if next_hop:
@@ -289,11 +361,13 @@ def forward_packet(packet, received_from):
                 encrypted_data = encrypt_data(json_data)
                 
                 if isinstance(next_hop, list):
+                    success = False
                     for ip in next_hop:
-                        send_to_peer(ip, encrypted_data)
-                    return True
+                        if send_to_peer(ip, encrypted_data, retry=2):
+                            success = True
+                    return success
                 else:
-                    return send_to_peer(next_hop, encrypted_data)
+                    return send_to_peer(next_hop, encrypted_data, retry=2)
         
         elif packet_type == "broadcast":
             # Check if we've seen this broadcast before
@@ -310,9 +384,11 @@ def forward_packet(packet, received_from):
                 json_data = json.dumps(packet)
                 encrypted_data = encrypt_data(json_data)
                 
+                success = False
                 for ip in neighbors:
-                    send_to_peer(ip, encrypted_data)
-                return True
+                    if send_to_peer(ip, encrypted_data):
+                        success = True
+                return success
         
         elif packet_type in ["file_info", "file_chunk"]:
             dest_id = packet.get("dst", "")
@@ -328,19 +404,40 @@ def forward_packet(packet, received_from):
             if isinstance(next_hop, list):
                 if received_from in next_hop:
                     next_hop.remove(received_from)
-                if next_hop:
+                
+                # For file transfers, pick the best node (prioritize bridge nodes)
+                bridge_ip = None
+                for ip in next_hop:
+                    for node_id, route in router.get_all_routes().items():
+                        if route["next_hop"] == ip and route.get("via_bridge", False):
+                            bridge_ip = ip
+                            break
+                    if bridge_ip:
+                        break
+                
+                if bridge_ip:
+                    next_hop = bridge_ip
+                elif next_hop:
                     next_hop = next_hop[0]  # Pick first for file transfers
                 else:
                     return False
             elif next_hop == received_from:
-                # No alternative route
-                return False
+                # Check for alternative routes via bridge nodes
+                for bridge_id in router.bridge_nodes:
+                    if bridge_id in router.routing_table:
+                        bridge_route = router.routing_table[bridge_id]
+                        if bridge_route["next_hop"] != received_from:
+                            next_hop = bridge_route["next_hop"]
+                            break
+                else:
+                    # No alternative route
+                    return False
             
             # Forward packet
             if next_hop:
                 json_data = json.dumps(packet)
                 encrypted_data = encrypt_data(json_data)
-                return send_to_peer(next_hop, encrypted_data)
+                return send_to_peer(next_hop, encrypted_data, retry=3)
         
         return False
         
