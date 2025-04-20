@@ -11,9 +11,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Import application components
 from server.listener import start_server
 from client.broadcast import broadcast_routing, periodic_discovery
+from client.gateway_discovery import start_gateway_service
 from gui.app import run_app
 from utils.logger import network_logger, routing_logger
-from config import MY_ID, MY_IP, PORT
+from config import MY_ID, MY_IP, PORT, IS_HOTSPOT_HOST
 
 def check_network_status():
     """Check and print network status information"""
@@ -37,6 +38,7 @@ def check_network_status():
         print(f"Node ID: {MY_ID}")
         print(f"Configured IP: {MY_IP}")
         print(f"Listening on port: {PORT}")
+        print(f"Is Hotspot Host: {IS_HOTSPOT_HOST}")
         print("================================")
         print("\nIf your IP address doesn't match the Configured IP, there might be networking issues.")
         print("Other computers should connect to your actual IP address (shown above).")
@@ -96,6 +98,11 @@ def main():
         discovery_thread = Thread(target=periodic_discovery, daemon=True)
         discovery_thread.start()
         
+        # Start gateway service if this is a hotspot host
+        if IS_HOTSPOT_HOST:
+            network_logger.info("Starting gateway service for hotspot hosts...")
+            start_gateway_service()
+            
         # Give time for the network services to initialize
         time.sleep(1)
         

@@ -1,2 +1,5 @@
 logs
 mesh_config.json
+
+
+Will it be easier to solve this issue if we can know which laptop has its hotspot turned on, that is acting as kind of a gateway to that network and then we can route accordingly.

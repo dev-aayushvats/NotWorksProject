@@ -2,7 +2,7 @@ import time
 import json
 import threading
 import uuid
-from config import MY_ID, MY_IP, KNOWN_PEERS, MAX_TTL, ROUTING_TIMEOUT
+from config import MY_ID, MY_IP, KNOWN_PEERS, MAX_TTL, ROUTING_TIMEOUT, IS_HOTSPOT_HOST
 from utils.logger import log_routing, routing_logger
 
 class Router:
@@ -14,6 +14,7 @@ class Router:
         self.secondary_routes = {}  # Backup routes for resilience
         self.lock = threading.RLock()  # Lock for thread safety
         self.bridge_nodes = set()  # Nodes that can bridge between networks
+        self.gateway_nodes = set()  # Nodes that act as hotspot hosts (gateways)
     
     def update_link_state(self, sender_id, sender_ip, link_state, seq_num, ttl):
         """Update routing table with new link state information"""
@@ -22,6 +23,14 @@ class Router:
             if sender_ip not in self.neighbors:
                 self.neighbors.add(sender_ip)
                 log_routing(sender_id, "NEW_NEIGHBOR", f"IP: {sender_ip}")
+            
+            # Check if this is a gateway node
+            if link_state.get("is_gateway", False) or (sender_id in self.gateway_nodes):
+                self.gateway_nodes.add(sender_id)
+                routing_logger.info(f"Node {sender_id} identified as a gateway/hotspot host")
+                # Also update in routing table
+                if sender_id in self.routing_table:
+                    self.routing_table[sender_id]["is_gateway"] = True
             
             # Check if this is a newer update
             if sender_id not in self.sequence_numbers or seq_num > self.sequence_numbers[sender_id]:
@@ -58,7 +67,8 @@ class Router:
                                 "ttl": new_ttl,
                                 "seq": routes["seq"],
                                 "timestamp": time.time(),
-                                "via_bridge": sender_id in self.bridge_nodes
+                                "via_bridge": sender_id in self.bridge_nodes,
+                                "is_gateway": sender_id in self.gateway_nodes
                             }
                             log_routing(node, "ROUTE_UPDATE", f"Via {next_hop}, TTL: {new_ttl}")
                 
@@ -82,7 +92,8 @@ class Router:
                 "ip": MY_IP,
                 "seq": my_seq,
                 "neighbors": list(self.neighbors),
-                "bridges": is_bridge
+                "bridges": is_bridge,
+                "is_gateway": IS_HOTSPOT_HOST
             }
             
             # Add information about other nodes we know
@@ -91,7 +102,8 @@ class Router:
                 if time.time() - route["timestamp"] <= ROUTING_TIMEOUT:
                     link_state[node_id] = {
                         "seq": route["seq"],
-                        "next_hop": route["next_hop"]
+                        "next_hop": route["next_hop"],
+                        "is_gateway": route.get("is_gateway", False)
                     }
             
             return link_state
@@ -133,6 +145,16 @@ class Router:
                     routing_logger.info(f"Using secondary route to {destination_id} via {sec_route['next_hop']}")
                     return sec_route["next_hop"]
             
+            # Check if any gateway nodes can help reach the destination
+            if self.gateway_nodes:
+                routing_logger.info(f"No direct route to {destination_id}, checking gateway nodes: {self.gateway_nodes}")
+                for gateway_id in self.gateway_nodes:
+                    if gateway_id in self.routing_table:
+                        gateway_route = self.routing_table[gateway_id]
+                        if time.time() - gateway_route["timestamp"] <= ROUTING_TIMEOUT:
+                            routing_logger.info(f"Routing via gateway node {gateway_id} at {gateway_route['next_hop']}")
+                            return gateway_route["next_hop"]
+            
             # Check if any bridge nodes can help reach the destination
             if self.bridge_nodes:
                 routing_logger.info(f"No direct route to {destination_id}, checking bridge nodes: {self.bridge_nodes}")
@@ -146,7 +168,19 @@ class Router:
             # If we don't have any specific route, return all neighbors for flooding
             all_neighbors = list(self.neighbors)
             
-            # Prioritize bridges for flooding if no specific route
+            # Prioritize gateways for flooding if no specific route
+            gateway_neighbors = []
+            for neighbor_ip in all_neighbors:
+                for node_id, route in self.routing_table.items():
+                    if route["next_hop"] == neighbor_ip and route.get("is_gateway", False):
+                        gateway_neighbors.append(neighbor_ip)
+                        break
+            
+            if gateway_neighbors:
+                routing_logger.info(f"No specific route, but found gateway neighbors to try: {gateway_neighbors}")
+                return gateway_neighbors
+            
+            # Next prioritize bridges for flooding if no specific route
             bridge_neighbors = []
             for neighbor_ip in all_neighbors:
                 for node_id, route in self.routing_table.items():
@@ -174,7 +208,8 @@ class Router:
                         "next_hop": route["next_hop"],
                         "ttl": route["ttl"],
                         "age": int(current_time - route["timestamp"]),
-                        "via_bridge": route.get("via_bridge", False)
+                        "via_bridge": route.get("via_bridge", False),
+                        "is_gateway": route.get("is_gateway", False)
                     }
             
             return active_routes
@@ -228,7 +263,7 @@ class Router:
             for node_id in stale_secondary:
                 del self.secondary_routes[node_id]
             
-            # Update bridge nodes set
+            # Update bridge and gateway nodes set
             stale_bridges = []
             for bridge_id in self.bridge_nodes:
                 if bridge_id not in self.routing_table and bridge_id not in self.secondary_routes:
@@ -236,6 +271,15 @@ class Router:
             
             for bridge_id in stale_bridges:
                 self.bridge_nodes.remove(bridge_id)
+                
+            # Update gateway nodes set
+            stale_gateways = []
+            for gateway_id in self.gateway_nodes:
+                if gateway_id not in self.routing_table and gateway_id not in self.secondary_routes:
+                    stale_gateways.remove(gateway_id)
+            
+            for gateway_id in stale_gateways:
+                self.gateway_nodes.remove(gateway_id)
             
             return len(stale_nodes)
 

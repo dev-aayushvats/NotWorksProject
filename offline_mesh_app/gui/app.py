@@ -6,10 +6,11 @@ import os
 from datetime import datetime
 
 from client.sender import send_message, send_file, broadcast_message
-from config import MY_ID, MY_IP, KNOWN_PEERS, save_config
+from config import MY_ID, MY_IP, KNOWN_PEERS, save_config, IS_HOTSPOT_HOST
 from routing.router import router
 from routing.cache import file_cache
 from utils.logger import get_message_history, gui_logger
+from client.gateway_discovery import start_gateway_service
 
 class MeshNetworkApp:
     def __init__(self, root):
@@ -106,7 +107,7 @@ class MeshNetworkApp:
         top_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # Create Treeview widget
-        columns = ("node_id", "next_hop", "ttl", "age")
+        columns = ("node_id", "next_hop", "ttl", "age", "node_type")
         self.routing_tree = ttk.Treeview(top_frame, columns=columns, show="headings")
         
         # Define headings
@@ -114,12 +115,14 @@ class MeshNetworkApp:
         self.routing_tree.heading("next_hop", text="Next Hop")
         self.routing_tree.heading("ttl", text="TTL")
         self.routing_tree.heading("age", text="Age (s)")
+        self.routing_tree.heading("node_type", text="Node Type")
         
         # Define columns
         self.routing_tree.column("node_id", width=150)
         self.routing_tree.column("next_hop", width=150)
         self.routing_tree.column("ttl", width=50)
         self.routing_tree.column("age", width=70)
+        self.routing_tree.column("node_type", width=100)
         
         # Add scrollbar
         scrollbar = ttk.Scrollbar(top_frame, orient=tk.VERTICAL, command=self.routing_tree.yview)
@@ -214,6 +217,29 @@ class MeshNetworkApp:
         
         ttk.Label(info_frame, text=f"Node ID: {MY_ID}").pack(anchor=tk.W, padx=10, pady=2)
         ttk.Label(info_frame, text=f"IP Address: {MY_IP}").pack(anchor=tk.W, padx=10, pady=2)
+        
+        # Hotspot host mode
+        hotspot_frame = ttk.LabelFrame(self.settings_tab, text="Hotspot Host Mode")
+        hotspot_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        description = """Enable this option if this device is hosting a WiFi hotspot.
+This will mark this node as a gateway that connects different network segments.
+Gateway nodes share information about all connected peers to enable multi-network mesh routing.
+Restart the application for changes to take effect."""
+        
+        ttk.Label(hotspot_frame, text=description, wraplength=600).pack(anchor=tk.W, padx=10, pady=5)
+        
+        # Hotspot toggle
+        toggle_frame = ttk.Frame(hotspot_frame)
+        toggle_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.hotspot_var = tk.BooleanVar(value=IS_HOTSPOT_HOST)
+        ttk.Checkbutton(toggle_frame, text="Enable Hotspot Host Mode", variable=self.hotspot_var, 
+                        command=self.toggle_hotspot_mode).pack(side=tk.LEFT, padx=5)
+        
+        self.hotspot_status = ttk.Label(toggle_frame, 
+                                       text=f"Status: {'ENABLED' if IS_HOTSPOT_HOST else 'DISABLED'}")
+        self.hotspot_status.pack(side=tk.LEFT, padx=20)
         
         # Manual peer addition
         peer_frame = ttk.LabelFrame(self.settings_tab, text="Add Peer Manually")
@@ -325,20 +351,32 @@ class MeshNetworkApp:
 
     def update_routing_table(self):
         """Update the routing table display"""
-        # Clear existing items
+        # Clear the routing tree
         for item in self.routing_tree.get_children():
             self.routing_tree.delete(item)
         
         # Get all active routes
         routes = router.get_all_routes()
         
-        # Add routes to the table
+        # Add routes to the tree
         for node_id, route in routes.items():
-            self.routing_tree.insert('', tk.END, values=(
+            node_type = []
+            if route.get("is_gateway", False):
+                node_type.append("Gateway")
+            if route.get("via_bridge", False):
+                node_type.append("Bridge")
+            if not node_type:
+                node_type.append("Regular")
+                
+            # Join the node types with commas
+            node_type_str = ", ".join(node_type)
+            
+            self.routing_tree.insert("", tk.END, values=(
                 node_id,
-                route['next_hop'],
-                route['ttl'],
-                route['age']
+                route["next_hop"],
+                route["ttl"],
+                route["age"],
+                node_type_str
             ))
 
     def update_file_transfers(self):
@@ -364,8 +402,9 @@ class MeshNetworkApp:
             ))
 
     def update_status_bar(self):
-        """Update the status bar with current node information"""
-        self.status_var.set(f"Node ID: {MY_ID} | IP: {MY_IP} | Connected peers: {len(router.neighbors)}")
+        """Update the status bar with current information"""
+        gateway_status = "Gateway: ✓" if IS_HOTSPOT_HOST else ""
+        self.status_var.set(f"Node ID: {MY_ID} | IP: {MY_IP} | Connected peers: {len(router.neighbors)} | {gateway_status}")
 
     def send_message(self, event=None):
         """Send a message to the selected destination"""
@@ -533,6 +572,49 @@ class MeshNetworkApp:
     def show_error(self, message):
         """Show an error message"""
         messagebox.showerror("Error", message)
+
+    def toggle_hotspot_mode(self):
+        """Toggle hotspot host mode"""
+        try:
+            from config import IS_HOTSPOT_HOST
+            import json
+            
+            # Get the new setting
+            new_setting = self.hotspot_var.get()
+            
+            # Update config file
+            config_file = "mesh_config.json"
+            
+            # Load current config
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r") as f:
+                        config = json.load(f)
+                except json.JSONDecodeError:
+                    config = {}
+            else:
+                config = {}
+            
+            # Update config
+            config["IS_HOTSPOT_HOST"] = new_setting
+            
+            # Save updated config
+            with open(config_file, "w") as f:
+                json.dump(config, f, indent=2)
+            
+            # Update UI
+            self.hotspot_status.config(text=f"Status: {'ENABLED' if new_setting else 'DISABLED'}")
+            
+            # Show message to user
+            if new_setting:
+                messagebox.showinfo("Hotspot Host Mode", 
+                                   "Hotspot host mode has been ENABLED. This device will act as a gateway between networks.\n\nPlease restart the application for changes to take effect.")
+            else:
+                messagebox.showinfo("Hotspot Host Mode", 
+                                   "Hotspot host mode has been DISABLED.\n\nPlease restart the application for changes to take effect.")
+                
+        except Exception as e:
+            self.show_error(f"Error toggling hotspot mode: {e}")
 
 def run_app():
     """Run the mesh network application"""

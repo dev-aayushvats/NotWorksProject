@@ -8,6 +8,7 @@ from routing.cache import message_cache, file_cache
 from utils.logger import log_message, log_routing, log_file_transfer, network_logger
 from utils.encryption import decrypt_data
 from client.sender import forward_packet
+from client.gateway_discovery import handle_gateway_update
 
 def handle_file_transfer(conn, addr):
     with open(f"received_file_{addr[1]}.dat", "wb") as f:
@@ -53,6 +54,8 @@ def handle_packet(data, addr, conn=None):
             handle_file_chunk_packet(packet, source_ip)
         elif packet_type == "file":
             handle_file_transfer(conn, addr)
+        elif packet_type == "gateway_update":
+            handle_gateway_update(packet, source_ip)
         else:
             network_logger.warning(f"Unknown packet type '{packet_type}' from {source_ip}")
             

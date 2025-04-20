@@ -62,7 +62,21 @@ For optimal mesh networking, follow these steps:
    - On macOS: Use Internet Sharing to create a Wi-Fi hotspot
    - On Linux: Use NetworkManager to create a hotspot
 
-3. **Firewall Configuration**:
+3. **Chained Hotspot Configuration**:
+   - For devices that create hotspots:
+     - Go to the Settings tab in the application
+     - Enable the "Hotspot Host Mode" option
+     - Restart the application when prompted
+   - This marks the device as a gateway that will share peer information
+   - Gateway nodes will automatically exchange their peer lists
+   - Other nodes can connect through these gateway nodes to reach all parts of the network
+   
+4. **Multi-Network Mesh**:
+   - With gateway nodes enabled, messages can route through multiple network segments
+   - For example: NodeA ↔ Hotspot1 ↔ Hotspot2 ↔ NodeB
+   - Each hotspot acts as a bridge between different network segments
+
+5. **Firewall Configuration**:
    - Allow incoming connections on port 5000 (TCP)
    - If using Windows, you may need to create an exception in Windows Defender Firewall
 
