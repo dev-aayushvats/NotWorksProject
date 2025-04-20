@@ -2,6 +2,8 @@ import json
 import os
 import base64
 import threading
+import time
+import uuid
 from config import MY_ID, DOWNLOAD_DIR
 from routing.router import router
 from routing.cache import message_cache, file_cache
@@ -13,9 +15,90 @@ from client.gateway_discovery import handle_gateway_update
 def handle_file_transfer(conn, addr):
     """Handle an incoming file transfer"""
     try:
-        # Create a unique filename based on source and timestamp
-        import tempfile
-        from datetime import datetime
+        # First check if this is a direct file transfer with a header
+        try:
+            # Try to read the first 4 bytes which might be a length header
+            header_data = conn.recv(4)
+            if len(header_data) == 4:
+                # Extract data length from header
+                data_length = int.from_bytes(header_data, byteorder='big')
+                
+                # Read the marker packet
+                marker_data = b''
+                remaining = data_length
+                while remaining > 0:
+                    chunk = conn.recv(min(remaining, 4096))
+                    if not chunk:
+                        break
+                    marker_data += chunk
+                    remaining -= len(chunk)
+                
+                # Try to parse as JSON to see if it's a marker packet
+                try:
+                    marker_packet = json.loads(marker_data.decode('utf-8'))
+                    packet_type = marker_packet.get("type", "")
+                    
+                    if packet_type == "direct_file_transfer":
+                        # This is a direct file transfer, get metadata
+                        file_id = marker_packet.get("file_id", str(uuid.uuid4()))
+                        source_id = marker_packet.get("src", "unknown")
+                        
+                        # Look up file information if available
+                        file_info = None
+                        for cached_id in file_cache.files:
+                            if cached_id == file_id:
+                                file_info = file_cache[cached_id]
+                                break
+                        
+                        filename = "unknown.dat"
+                        if file_info:
+                            filename = file_info.get("filename", filename)
+                        
+                        # Create a temporary file
+                        temp_dir = os.path.join(DOWNLOAD_DIR, "temp")
+                        os.makedirs(temp_dir, exist_ok=True)
+                        
+                        # Generate a unique filename
+                        temp_filename = f"incoming_{addr[0]}_{int(time.time())}.dat"
+                        temp_path = os.path.join(temp_dir, temp_filename)
+                        
+                        # Receive the file data
+                        total_received = 0
+                        with open(temp_path, "wb") as f:
+                            while True:
+                                chunk = conn.recv(8192)
+                                if not chunk:
+                                    break
+                                f.write(chunk)
+                                total_received += len(chunk)
+                        
+                        network_logger.info(f"Direct file transfer received from {addr[0]}: {total_received} bytes")
+                        
+                        # Move to final location
+                        import shutil
+                        safe_filename = os.path.basename(filename)
+                        name_parts = os.path.splitext(safe_filename)
+                        new_filename = f"{name_parts[0]}_{int(time.time())}{name_parts[1]}"
+                        dest_path = os.path.join(DOWNLOAD_DIR, new_filename)
+                        shutil.move(temp_path, dest_path)
+                        
+                        network_logger.info(f"File saved to {dest_path}")
+                        
+                        # Log the file transfer
+                        log_file_transfer(filename, source_id, MY_ID, "COMPLETED", 
+                                         f"Size: {total_received} bytes, Saved to {dest_path}")
+                        
+                        # Clean up connection
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                        return
+                except:
+                    # Not a valid marker packet, continue with regular file transfer
+                    network_logger.debug(f"Received data from {addr[0]} is not a valid direct transfer marker")
+        except Exception as e:
+            network_logger.debug(f"Error checking for direct file transfer header: {e}")
         
         # Create a temporary file
         temp_dir = os.path.join(DOWNLOAD_DIR, "temp")
@@ -30,12 +113,27 @@ def handle_file_transfer(conn, addr):
         
         # Receive the file in chunks
         with open(temp_path, "wb") as f:
+            # Write header data if we already read it
+            if 'header_data' in locals() and header_data:
+                f.write(header_data)
+                total_received += len(header_data)
+            
+            # Write marker data if we already read it
+            if 'marker_data' in locals() and marker_data:
+                f.write(marker_data)
+                total_received += len(marker_data)
+            
+            # Continue reading the rest of the data
             while True:
-                chunk = conn.recv(4096)
-                if not chunk:
+                try:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    total_received += len(chunk)
+                except Exception as e:
+                    network_logger.error(f"Error receiving file chunk: {e}")
                     break
-                f.write(chunk)
-                total_received += len(chunk)
         
         network_logger.info(f"File received from {addr[0]}: {total_received} bytes")
         

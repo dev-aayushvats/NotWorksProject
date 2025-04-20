@@ -266,23 +266,46 @@ def send_file(destination_id, file_path):
                     
                     # Now send the actual file directly with binary transfer
                     # This is much faster for large files
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(10)  # Longer timeout for file transfer
-                    s.connect((next_hop, PORT))
-                    
-                    # Show progress bar
-                    with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
-                        while True:
-                            chunk = f.read(CHUNK_SIZE)
-                            if not chunk:
-                                break
-                            s.sendall(chunk)
-                            pbar.update(len(chunk))
-                    
-                    s.close()
-                    network_logger.info(f"Direct file transfer completed to {destination_id}")
-                    log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
-                    return True
+                    try:
+                        # Mark message as a direct file transfer
+                        marker_packet = {
+                            "type": "direct_file_transfer",
+                            "file_id": file_id,
+                            "src": MY_ID,
+                            "dst": destination_id
+                        }
+                        
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(30)  # Longer timeout for file transfer
+                        s.connect((next_hop, PORT))
+                        
+                        # First send a small marker packet so receiver knows this is a direct transfer
+                        marker_json = json.dumps(marker_packet)
+                        marker_data = marker_json.encode('utf-8')
+                        header = len(marker_data).to_bytes(4, byteorder='big')
+                        s.sendall(header + marker_data)
+                        
+                        # Small delay to let receiver prepare
+                        time.sleep(0.2)
+                        
+                        # Now send the actual file
+                        with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
+                            while True:
+                                chunk = f.read(CHUNK_SIZE)
+                                if not chunk:
+                                    break
+                                s.sendall(chunk)
+                                pbar.update(len(chunk))
+                        
+                        # Wait a bit to ensure all data is sent
+                        time.sleep(0.5)
+                        s.close()
+                        network_logger.info(f"Direct file transfer completed to {destination_id}")
+                        log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
+                        return True
+                    except Exception as e:
+                        network_logger.error(f"Error in direct file transfer: {e}")
+                        # Continue to chunked method
         except Exception as e:
             network_logger.warning(f"Direct file transfer failed, falling back to chunked method: {e}")
             # Fall back to the chunked method below
