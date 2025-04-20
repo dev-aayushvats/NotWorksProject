@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_500">#6200EE</color>
+    <color name="purple_700">#3700B3</color>
+    <color name="white">#FFFFFF</color>
+    <string name="app_name">OfflineMesh</string>
+    <string name="button_scan">Scan for Devices</string>
+    <string name="none_found">No devices found</string>
+    <string name="none_paired">No paired devices</string>
+    <string name="scanning">Scanning for devices...</string>
+    <string name="select_device">Select a device</string>
+    <string name="title_other_devices">Other Devices</string>
+    <string name="title_paired_devices">Paired Devices</string>
+    <style name="Theme.OfflineMesh" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+    </style>
+</resources>

@@ -1,0 +1,30 @@
+[
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/layout_activity_main.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/drawable_sent_message_bg.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/drawable/sent_message_bg.xml"
+    },
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/drawable_received_message_bg.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/drawable/received_message_bg.xml"
+    },
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/layout_activity_chat.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/layout/activity_chat.xml"
+    },
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/layout_message_bubble.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/layout/message_bubble.xml"
+    },
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/layout_device_name.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/layout/device_name.xml"
+    },
+    {
+        "merged": "com.example.offlinemesh.app-merged_res-28:/layout_activity_device_list.xml.flat",
+        "source": "com.example.offlinemesh.app-main-30:/layout/activity_device_list.xml"
+    }
+]
