@@ -5,7 +5,7 @@ import uuid
 import time
 import os
 import base64
-from config import PORT, MY_ID, MY_IP
+from config import PORT, MY_ID, MY_IP, DOWNLOAD_DIR
 from routing.router import router
 from routing.cache import message_cache, file_cache
 from client.sender import forward_packet
@@ -96,11 +96,11 @@ def handle_file_chunk(packet):
         # Save the file
         try:
             # Create directory if needed
-            os.makedirs("downloads", exist_ok=True)
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
             
             # Get clean filename (avoid path traversal)
             safe_filename = os.path.basename(file_info["filename"])
-            save_path = os.path.join("downloads", safe_filename)
+            save_path = os.path.join(DOWNLOAD_DIR, safe_filename)
             
             # Write all chunks in order
             with open(save_path, "wb") as f:
@@ -200,42 +200,138 @@ def handle_client(client_socket, client_address):
         # Buffer to collect data
         data_buffer = b""
         
-        # Receive data
-        while True:
-            data = client_socket.recv(4096)
-            if not data:
-                break
-            
-            data_buffer += data
-            
-            # Try to extract complete JSON messages
-            try:
-                # Decrypt the data
-                decrypted_data = decrypt_data(data_buffer)
-                packet = json.loads(decrypted_data)
+        # First try to parse as a JSON packet
+        try:
+            # Receive data
+            while True:
+                data = client_socket.recv(4096)
+                if not data:
+                    break
                 
-                # Record the sender IP for routing
-                sender_ip = client_address[0]
+                data_buffer += data
                 
-                # Handle the message
-                handle_message(packet, sender_ip)
+                # Try to extract complete JSON messages
+                try:
+                    # Decrypt the data
+                    decrypted_data = decrypt_data(data_buffer)
+                    packet = json.loads(decrypted_data)
+                    
+                    # Record the sender IP for routing
+                    sender_ip = client_address[0]
+                    
+                    # Handle the message
+                    handle_message(packet, sender_ip)
+                    
+                    # Clear buffer after successful processing
+                    data_buffer = b""
+                    
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # Could be incomplete data or binary file, continue receiving
+                    # Check if buffer is very large, might be a binary file
+                    if len(data_buffer) > 10240:  # 10KB
+                        # This is likely a binary file transfer
+                        network_logger.info(f"Large binary data detected from {client_address[0]}, treating as file transfer")
+                        handle_binary_file(data_buffer, client_socket, client_address)
+                        return
+                        
+        except socket.timeout:
+            # If we got a timeout but have data, it might be a binary file
+            if data_buffer:
+                network_logger.info(f"Timeout with {len(data_buffer)} bytes from {client_address[0]}, treating as file transfer")
+                handle_binary_file(data_buffer, client_socket, client_address)
+                return
+            else:
+                network_logger.warning(f"Connection from {client_address} timed out")
                 
-                # Clear buffer after successful processing
-                data_buffer = b""
-                
-            except Exception as e:
-                # Could be incomplete data, continue receiving
-                pass
-                
-    except socket.timeout:
-        network_logger.warning(f"Connection from {client_address} timed out")
-        
-    except json.JSONDecodeError:
-        network_logger.error(f"Invalid JSON from {client_address}")
-        
     except Exception as e:
         network_logger.error(f"Error handling connection from {client_address}: {e}")
         
+    finally:
+        client_socket.close()
+
+
+def handle_binary_file(initial_data, client_socket, client_address):
+    """Handle binary file data"""
+    try:
+        # Check if we have any pending file info packets waiting for binary data
+        pending_files = []
+        for file_id, file_data in file_cache.items():
+            # Check if this is a file from this source
+            if file_data.get("src_id") == client_address[0]:
+                # Check if we have the file info but no chunks yet
+                if file_data.get("chunks") and len(file_data["chunks"]) == 0:
+                    pending_files.append(file_id)
+        
+        # Create a temporary file to store the binary data
+        import tempfile
+        import os
+        
+        # Create directory if it doesn't exist
+        temp_dir = os.path.join(DOWNLOAD_DIR, "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Create a temporary file
+        temp_path = os.path.join(temp_dir, f"binary_{client_address[0]}_{int(time.time())}.dat")
+        
+        # Write the initial data first
+        total_bytes = len(initial_data)
+        with open(temp_path, "wb") as f:
+            f.write(initial_data)
+            
+            # Continue receiving data
+            try:
+                while True:
+                    client_socket.settimeout(5)
+                    chunk = client_socket.recv(4096)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    total_bytes += len(chunk)
+            except socket.timeout:
+                # Just stop reading if we timeout
+                pass
+        
+        network_logger.info(f"Received binary file from {client_address[0]}: {total_bytes} bytes")
+        
+        # Now check if we need to do something with this file
+        if pending_files:
+            # Use the first pending file
+            file_id = pending_files[0]
+            file_info = file_cache[file_id]
+            
+            # Move the file to the downloads directory
+            import shutil
+            filename = file_info.get("filename", f"received_{file_id}.bin")
+            safe_filename = os.path.basename(filename)
+            
+            # Add timestamp to avoid overwrites
+            name_parts = os.path.splitext(safe_filename)
+            new_filename = f"{name_parts[0]}_{int(time.time())}{name_parts[1]}"
+            
+            # Ensure download directory exists
+            if not os.path.exists(DOWNLOAD_DIR):
+                os.makedirs(DOWNLOAD_DIR)
+                
+            dest_path = os.path.join(DOWNLOAD_DIR, new_filename)
+            shutil.move(temp_path, dest_path)
+            
+            # Log the successful transfer
+            log_file_transfer(filename, file_info.get("src_id", "unknown"), MY_ID, "COMPLETED", 
+                             f"Saved to {dest_path}")
+            
+            # Remove from cache
+            del file_cache[file_id]
+        else:
+            # No pending file info, just save with a generic name
+            import shutil
+            dest_path = os.path.join(DOWNLOAD_DIR, f"received_binary_{int(time.time())}.dat")
+            shutil.move(temp_path, dest_path)
+            
+            network_logger.info(f"Saved binary file from {client_address[0]} to {dest_path}")
+            
+    except Exception as e:
+        network_logger.error(f"Error handling binary file: {e}")
+    
     finally:
         client_socket.close()
 

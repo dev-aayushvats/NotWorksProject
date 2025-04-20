@@ -128,24 +128,50 @@ class FileCache:
             
             file_data = self.cache[file_id]
             filename = file_data["filename"]
-            output_path = os.path.join(DOWNLOAD_DIR, filename)
             
-            # Combine chunks in order
-            with open(output_path, "wb") as f:
-                for i in range(file_data["total_chunks"]):
-                    chunk = file_data["chunks"][i]
-                    # If chunk is base64 encoded, decode it
-                    if isinstance(chunk, str):
-                        try:
-                            chunk = base64.b64decode(chunk)
-                        except:
-                            pass
-                    f.write(chunk)
+            # Create a safe filename (avoid path traversal)
+            safe_filename = os.path.basename(filename)
             
-            # Remove from cache (no longer needed)
-            del self.cache[file_id]
+            # Add a timestamp to avoid overwriting existing files
+            import time
+            timestamp = int(time.time())
+            name_parts = os.path.splitext(safe_filename)
+            new_filename = f"{name_parts[0]}_{timestamp}{name_parts[1]}"
             
-            return output_path
+            # Ensure download directory exists
+            if not os.path.exists(DOWNLOAD_DIR):
+                os.makedirs(DOWNLOAD_DIR)
+                
+            output_path = os.path.join(DOWNLOAD_DIR, new_filename)
+            
+            try:
+                # Combine chunks in order
+                with open(output_path, "wb") as f:
+                    for i in range(file_data["total_chunks"]):
+                        if i not in file_data["chunks"]:
+                            raise ValueError(f"Missing chunk {i} when saving file {filename}")
+                        
+                        chunk = file_data["chunks"][i]
+                        # If chunk is base64 encoded string, decode it
+                        if isinstance(chunk, str):
+                            try:
+                                chunk = base64.b64decode(chunk)
+                            except:
+                                # If decoding fails, try using it as-is
+                                chunk = chunk.encode() if isinstance(chunk, str) else chunk
+                        f.write(chunk)
+                
+                # Log success
+                log_routing(file_id, "FILE_SAVED", f"Saved to {output_path}")
+                
+                # Remove from cache (no longer needed)
+                del self.cache[file_id]
+                
+                return output_path
+                
+            except Exception as e:
+                log_routing(file_id, "FILE_SAVE_ERROR", str(e))
+                return None
     
     def _cleanup_file(self, file_id):
         """Clean up any temporary files for a file ID"""

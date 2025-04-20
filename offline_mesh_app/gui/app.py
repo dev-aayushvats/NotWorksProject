@@ -382,6 +382,13 @@ Restart the application for changes to take effect."""
 
     def update_file_transfers(self):
         """Update the file transfers display"""
+        # Store previous transfers
+        previous_transfers = {}
+        for item in self.transfers_tree.get_children():
+            values = self.transfers_tree.item(item, 'values')
+            if values:
+                previous_transfers[values[0]] = values  # filename -> values
+        
         # Clear existing items
         for item in self.transfers_tree.get_children():
             self.transfers_tree.delete(item)
@@ -403,6 +410,13 @@ Restart the application for changes to take effect."""
                     f"{received_chunks}/{total_chunks} ({progress})",
                     f"{total_chunks} chunks"
                 ))
+                
+                # Check if this file just completed
+                if progress == "100%" and previous_transfers.get(filename, ('', '', ''))[2] != f"{total_chunks}/{total_chunks} (100%)":
+                    # This is a newly completed file
+                    threading.Thread(target=lambda: messagebox.showinfo("File Transfer Complete", 
+                                                                        f"File '{filename}' has been received successfully."),
+                                    daemon=True).start()
             
             # Add any active outgoing transfers
             # This is just a placeholder for active transfers initiated by this node

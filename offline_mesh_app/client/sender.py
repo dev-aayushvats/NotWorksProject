@@ -198,6 +198,95 @@ def send_file(destination_id, file_path):
         log_file_transfer(filename, MY_ID, destination_id, "STARTED", 
                          f"Size: {filesize} bytes, Chunks: {num_chunks}")
         
+        # Get next hop for destination
+        next_hop = router.get_next_hop(destination_id)
+        
+        # If no route, abort
+        if not next_hop or (isinstance(next_hop, list) and not next_hop):
+            network_logger.error(f"No route to {destination_id} for file transfer")
+            return False
+        
+        # If multiple routes, choose first one for file transfer
+        # Prioritize bridge nodes for multi-hop networks
+        if isinstance(next_hop, list):
+            # Look for bridge nodes
+            bridge_ip = None
+            for ip in next_hop:
+                for node_id, route in router.get_all_routes().items():
+                    if route["next_hop"] == ip and route.get("via_bridge", False):
+                        bridge_ip = ip
+                        break
+                if bridge_ip:
+                    break
+            
+            if bridge_ip:
+                network_logger.info(f"Using bridge node {bridge_ip} for file transfer")
+                next_hop = bridge_ip
+            else:
+                next_hop = next_hop[0] if next_hop else None
+        
+        # First option: Try sending the file directly over a socket (this is faster for one-hop transfers)
+        try:
+            # Check if this is a direct connection (one hop)
+            is_direct_connection = False
+            # Check if destination is a direct neighbor
+            if destination_id in router.routing_table:
+                route = router.routing_table[destination_id]
+                if route["ttl"] == 1:  # TTL of 1 means direct neighbor
+                    is_direct_connection = True
+            
+            if is_direct_connection:
+                network_logger.info(f"Attempting direct file transfer to {destination_id} at {next_hop}")
+                
+                # Send file info first with normal method (to prepare receiver)
+                info_packet = {
+                    "type": "file_info",
+                    "id": file_id,
+                    "src": MY_ID,
+                    "dst": destination_id,
+                    "filename": filename,
+                    "filesize": filesize,
+                    "total_chunks": num_chunks,
+                    "ttl": MAX_TTL,
+                    "timestamp": time.time(),
+                    "multi_hop": True
+                }
+                
+                # Convert to JSON and encrypt
+                json_data = json.dumps(info_packet)
+                encrypted_data = encrypt_data(json_data)
+                
+                # Send file info to prepare receiver
+                if not send_to_peer(next_hop, encrypted_data, retry=2):
+                    network_logger.error(f"Failed to send file info to {destination_id}")
+                    # Fall back to chunked method later
+                else:
+                    # Wait a brief moment for the receiver to process the file info
+                    time.sleep(0.5)
+                    
+                    # Now send the actual file directly with binary transfer
+                    # This is much faster for large files
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(10)  # Longer timeout for file transfer
+                    s.connect((next_hop, PORT))
+                    
+                    # Show progress bar
+                    with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
+                        while True:
+                            chunk = f.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            s.sendall(chunk)
+                            pbar.update(len(chunk))
+                    
+                    s.close()
+                    network_logger.info(f"Direct file transfer completed to {destination_id}")
+                    log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
+                    return True
+        except Exception as e:
+            network_logger.warning(f"Direct file transfer failed, falling back to chunked method: {e}")
+            # Fall back to the chunked method below
+        
         # Show progress bar
         with tqdm(total=num_chunks, desc=f"Sending {filename}", unit="chunk") as pbar:
             # Send file info first
@@ -217,33 +306,6 @@ def send_file(destination_id, file_path):
             # Convert to JSON and encrypt
             json_data = json.dumps(info_packet)
             encrypted_data = encrypt_data(json_data)
-            
-            # Get next hop for destination
-            next_hop = router.get_next_hop(destination_id)
-            
-            # If no route, abort
-            if not next_hop or (isinstance(next_hop, list) and not next_hop):
-                network_logger.error(f"No route to {destination_id} for file transfer")
-                return False
-            
-            # If multiple routes, choose first one for file transfer
-            # Prioritize bridge nodes for multi-hop networks
-            if isinstance(next_hop, list):
-                # Look for bridge nodes
-                bridge_ip = None
-                for ip in next_hop:
-                    for node_id, route in router.get_all_routes().items():
-                        if route["next_hop"] == ip and route.get("via_bridge", False):
-                            bridge_ip = ip
-                            break
-                    if bridge_ip:
-                        break
-                
-                if bridge_ip:
-                    network_logger.info(f"Using bridge node {bridge_ip} for file transfer")
-                    next_hop = bridge_ip
-                else:
-                    next_hop = next_hop[0] if next_hop else None
             
             # Send file info
             if not send_to_peer(next_hop, encrypted_data, retry=3):

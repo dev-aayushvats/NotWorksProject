@@ -11,13 +11,55 @@ from client.sender import forward_packet
 from client.gateway_discovery import handle_gateway_update
 
 def handle_file_transfer(conn, addr):
-    with open(f"received_file_{addr[1]}.dat", "wb") as f:
-        while True:
-            data = conn.recv(4096)
-            if not data:
-                break
-            f.write(data)
-    print(f"[INFO] File received from {addr}")
+    """Handle an incoming file transfer"""
+    try:
+        # Create a unique filename based on source and timestamp
+        import tempfile
+        from datetime import datetime
+        
+        # Create a temporary file
+        temp_dir = os.path.join(DOWNLOAD_DIR, "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Generate a unique filename
+        temp_filename = f"incoming_{addr[0]}_{int(time.time())}.dat"
+        temp_path = os.path.join(temp_dir, temp_filename)
+        
+        # Track data received
+        total_received = 0
+        
+        # Receive the file in chunks
+        with open(temp_path, "wb") as f:
+            while True:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                f.write(chunk)
+                total_received += len(chunk)
+        
+        network_logger.info(f"File received from {addr[0]}: {total_received} bytes")
+        
+        # Now process the file - in a real implementation, you would need to
+        # determine which file_id this belongs to and add it to the correct file cache
+        # For now, we'll just move it to the downloads directory
+        
+        # Check if there's a pending file in the cache that needs this data
+        # This is a simple implementation - in practice you would need a more robust way
+        # to match binary data with file_info packets
+        import shutil
+        dest_path = os.path.join(DOWNLOAD_DIR, f"received_file_{int(time.time())}.dat")
+        shutil.move(temp_path, dest_path)
+        
+        network_logger.info(f"File saved to {dest_path}")
+    except Exception as e:
+        network_logger.error(f"Error handling file transfer from {addr}: {e}")
+        
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 def handle_packet(data, addr, conn=None):
     """Handle an incoming packet"""
@@ -25,39 +67,63 @@ def handle_packet(data, addr, conn=None):
         # Get the source IP
         source_ip = addr[0]
         
-        # Try to decrypt the data
+        # First, check if this might be binary file data
         try:
-            decrypted_data = decrypt_data(data)
-            if isinstance(decrypted_data, bytes):
-                data = decrypted_data
+            # Try to decode as JSON to see if it's a valid packet
+            json_packet = None
+            try:
+                # Try to decrypt the data if it's encrypted
+                try:
+                    decrypted_data = decrypt_data(data)
+                    if isinstance(decrypted_data, bytes):
+                        data = decrypted_data
+                    else:
+                        data = decrypted_data.encode()
+                except Exception as e:
+                    network_logger.debug(f"Failed to decrypt packet from {source_ip}, may be binary data: {e}")
+                
+                # Now try to parse as JSON
+                json_packet = json.loads(data.decode('utf-8'))
+                
+            except UnicodeDecodeError:
+                # This is likely binary data, handle as file transfer
+                network_logger.debug(f"Received binary data from {source_ip}, treating as file transfer")
+                handle_file_transfer(conn, addr)
+                return
+            except json.JSONDecodeError:
+                # This is likely binary data, handle as file transfer
+                network_logger.debug(f"Received data that's not valid JSON from {source_ip}, treating as file transfer")
+                handle_file_transfer(conn, addr)
+                return
+            
+            # If we get here, we have a valid JSON packet
+            packet = json_packet
+            
+            # Extract packet type
+            packet_type = packet.get("type", "unknown")
+            
+            # Handle different packet types
+            if packet_type == "routing":
+                handle_routing_packet(packet, source_ip)
+            elif packet_type == "message":
+                handle_message_packet(packet, source_ip)
+            elif packet_type == "broadcast":
+                handle_broadcast_packet(packet, source_ip)
+            elif packet_type == "file_info":
+                handle_file_info_packet(packet, source_ip)
+            elif packet_type == "file_chunk":
+                handle_file_chunk_packet(packet, source_ip)
+            elif packet_type == "gateway_update":
+                handle_gateway_update(packet, source_ip)
+            elif packet_type == "file":
+                handle_file_transfer(conn, addr)
             else:
-                data = decrypted_data.encode()
+                network_logger.warning(f"Unknown packet type '{packet_type}' from {source_ip}")
+                
         except Exception as e:
-            network_logger.warning(f"Failed to decrypt packet from {source_ip}: {e}")
-        
-        # Parse JSON packet
-        packet = json.loads(data.decode())
-        
-        # Extract packet type
-        packet_type = packet.get("type", "unknown")
-        
-        # Handle different packet types
-        if packet_type == "routing":
-            handle_routing_packet(packet, source_ip)
-        elif packet_type == "message":
-            handle_message_packet(packet, source_ip)
-        elif packet_type == "broadcast":
-            handle_broadcast_packet(packet, source_ip)
-        elif packet_type == "file_info":
-            handle_file_info_packet(packet, source_ip)
-        elif packet_type == "file_chunk":
-            handle_file_chunk_packet(packet, source_ip)
-        elif packet_type == "file":
+            # If all parsing fails, try to handle as a file transfer
+            network_logger.debug(f"Error processing packet data, trying as file transfer: {e}")
             handle_file_transfer(conn, addr)
-        elif packet_type == "gateway_update":
-            handle_gateway_update(packet, source_ip)
-        else:
-            network_logger.warning(f"Unknown packet type '{packet_type}' from {source_ip}")
             
     except Exception as e:
         network_logger.error(f"Error handling packet from {addr}: {e}")
