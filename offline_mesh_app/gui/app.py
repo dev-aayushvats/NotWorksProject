@@ -698,4 +698,4 @@ def run_app():
     """Run the mesh network application"""
     root = tk.Tk()
     app = MeshNetworkApp(root)
-    root.mainloop()
+    root.mainloop() 

@@ -4,13 +4,13 @@ A resilient peer-to-peer mesh network application for communication without trad
 
 ## Features
 
-- 🌐 **Peer Discovery**: Automatically finds other nodes on the local network
-- 🔄 **HSLS Routing Protocol**: Implements Hazy-Sighted Link State routing for multi-hop communication
-- 💬 **Messaging**: Secure text messaging between nodes
-- 📁 **File Sharing**: Transfer files between nodes with chunking and reassembly
-- 🔒 **End-to-End Encryption**: AES encryption for secure communication
-- 🔄 **Store-and-Forward**: Caches messages until delivery is possible
-- 🔁 **Self-Healing**: Dynamic reconfiguration when nodes join or leave
+- **Peer Discovery**: Automatically finds other nodes on the local network
+- **HSLS Routing Protocol**: Implements Hazy-Sighted Link State routing for multi-hop communication
+- **Messaging**: Secure text messaging between nodes
+- **File Sharing**: Transfer files between nodes with chunking and reassembly
+- **End-to-End Encryption**: AES encryption for secure communication
+- **Store-and-Forward**: Caches messages until delivery is possible
+- **Self-Healing**: Dynamic reconfiguration when nodes join or leave
 
 ## Requirements
 

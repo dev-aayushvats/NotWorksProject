@@ -1,2 +1,5 @@
 logs
 mesh_config.json
+*/__pycache__
+
+

@@ -85,47 +85,23 @@ def main():
             
         # Start background TCP server
         network_logger.info("Starting TCP server...")
-        try:
-            server_thread = Thread(target=start_server, daemon=True)
-            server_thread.start()
-            print("✅ TCP server started successfully")
-        except Exception as e:
-            network_logger.error(f"Failed to start TCP server: {e}")
-            print(f"❌ Error starting TCP server: {e}")
-            # Continue anyway - some functions might still work
+        server_thread = Thread(target=start_server, daemon=True)
+        server_thread.start()
 
         # Start HSLS routing broadcast thread
         routing_logger.info("Starting routing protocol...")
-        try:
-            routing_thread = Thread(target=broadcast_routing, daemon=True)
-            routing_thread.start()
-            print("✅ Routing protocol started successfully")
-        except Exception as e:
-            network_logger.error(f"Failed to start routing protocol: {e}")
-            print(f"❌ Error starting routing protocol: {e}")
-            # Continue anyway - manual routing might still work
+        routing_thread = Thread(target=broadcast_routing, daemon=True)
+        routing_thread.start()
 
         # Start periodic peer discovery
         network_logger.info("Starting peer discovery...")
-        try:
-            discovery_thread = Thread(target=periodic_discovery, daemon=True)
-            discovery_thread.start()
-            print("✅ Peer discovery started successfully")
-        except Exception as e:
-            network_logger.error(f"Failed to start peer discovery: {e}")
-            print(f"❌ Error starting peer discovery: {e}")
-            # Continue anyway - manual peer addition will still work
+        discovery_thread = Thread(target=periodic_discovery, daemon=True)
+        discovery_thread.start()
         
         # Start gateway service if this is a hotspot host
         if IS_HOTSPOT_HOST:
             network_logger.info("Starting gateway service for hotspot hosts...")
-            try:
-                start_gateway_service()
-                print("✅ Gateway service started successfully")
-            except Exception as e:
-                network_logger.error(f"Failed to start gateway service: {e}")
-                print(f"❌ Error starting gateway service: {e}")
-                # Continue anyway - basic mesh functions will still work
+            start_gateway_service()
             
         # Give time for the network services to initialize
         time.sleep(1)
@@ -136,8 +112,7 @@ def main():
         run_app()
         
     except Exception as e:
-        network_logger.error(f"Critical error starting application: {e}")
-        print(f"❌ Critical error starting application: {e}")
+        print(f"Error starting application: {e}")
         sys.exit(1)
         
 if __name__ == "__main__":

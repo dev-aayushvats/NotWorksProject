@@ -36,7 +36,6 @@ def send_file_to_peer(ip, file_path):
 def send_to_peer(ip, data, retry=3):
     """Send data to a specific peer with enhanced retry logic"""
     for attempt in range(retry + 1):
-        s = None
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(5)
@@ -47,41 +46,17 @@ def send_to_peer(ip, data, retry=3):
                 data = data.encode()
                 
             s.sendall(data)
+            s.close()
             return True
-        except ConnectionRefusedError:
-            # This means the peer is not listening - critical failure
-            if attempt < retry:
-                backoff_time = (attempt + 1) * 1.5
-                network_logger.warning(f"Connection refused by {ip}, retrying in {backoff_time}s (attempt {attempt+1}/{retry})")
-                time.sleep(backoff_time)  # Increasing backoff
-            else:
-                network_logger.error(f"Connection refused by {ip} after {retry} retries")
-                return False
-        except (socket.timeout, TimeoutError):
-            # Timeout - peer might be busy
-            if attempt < retry:
-                backoff_time = (attempt + 1) * 2.0  # Longer backoff for timeouts
-                network_logger.warning(f"Connection to {ip} timed out, retrying in {backoff_time}s (attempt {attempt+1}/{retry})")
-                time.sleep(backoff_time)
-            else:
-                network_logger.error(f"Connection to {ip} timed out after {retry} retries")
-                return False
         except Exception as e:
-            # Other errors
             if attempt < retry:
+                # Increasing backoff time between retries
                 backoff_time = (attempt + 1) * 1.5
                 network_logger.warning(f"Failed to send to {ip}, retrying in {backoff_time}s (attempt {attempt+1}/{retry}): {e}")
                 time.sleep(backoff_time)  # Increasing backoff
             else:
                 network_logger.error(f"Failed to send to {ip} after {retry} retries: {e}")
                 return False
-        finally:
-            # Always ensure socket is closed properly
-            if s:
-                try:
-                    s.close()
-                except:
-                    pass
 
 def send_message(destination_id, content, message_type="text"):
     """Send a message to a specific node"""
@@ -212,15 +187,15 @@ def send_file(destination_id, file_path):
         return False
     
     try:
-        # Get file info
+        # Generate a unique file ID
         file_id = str(uuid.uuid4())
         filename = os.path.basename(file_path)
         filesize = os.path.getsize(file_path)
         
-        # Calculate number of chunks - more reliably
-        num_chunks = (filesize + CHUNK_SIZE - 1) // CHUNK_SIZE if filesize > 0 else 1
+        # Calculate number of chunks
+        num_chunks = (filesize + CHUNK_SIZE - 1) // CHUNK_SIZE
         
-        network_logger.info(f"Sending file {filename} to {destination_id}. " + 
+        log_file_transfer(filename, MY_ID, destination_id, "STARTED", 
                          f"Size: {filesize} bytes, Chunks: {num_chunks}")
         
         # Get next hop for destination
@@ -291,49 +266,26 @@ def send_file(destination_id, file_path):
                     
                     # Now send the actual file directly with binary transfer
                     # This is much faster for large files
-                    s = None
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        s.settimeout(15)  # Longer timeout for file transfer
-                        s.connect((next_hop, PORT))
-                        
-                        # Show progress bar
-                        bytes_sent = 0
-                        with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
-                            buffer_size = min(CHUNK_SIZE, 8192)  # Use smaller buffer to improve progress updates
-                            while True:
-                                chunk = f.read(buffer_size)
-                                if not chunk:
-                                    break
-                                s.sendall(chunk)
-                                bytes_sent += len(chunk)
-                                pbar.update(len(chunk))
-                                
-                                # For large files, log progress occasionally
-                                if bytes_sent % (1024 * 1024) == 0:  # Log every 1MB
-                                    network_logger.debug(f"Sent {bytes_sent // (1024*1024)}MB of {filesize // (1024*1024)}MB")
-                        
-                        # Wait for data to finish sending
-                        time.sleep(0.5)
-                        network_logger.info(f"Direct file transfer completed to {destination_id}, sent {bytes_sent} bytes")
-                        log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
-                        return True
-                    except Exception as e:
-                        network_logger.error(f"Error in direct file transfer: {e}")
-                        # Continue to chunked method
-                    finally:
-                        # Ensure socket is closed even if an exception occurs
-                        if s is not None:
-                            try:
-                                s.close()
-                            except:
-                                pass
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(10)  # Longer timeout for file transfer
+                    s.connect((next_hop, PORT))
+                    
+                    # Show progress bar
+                    with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
+                        while True:
+                            chunk = f.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            s.sendall(chunk)
+                            pbar.update(len(chunk))
+                    
+                    s.close()
+                    network_logger.info(f"Direct file transfer completed to {destination_id}")
+                    log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
+                    return True
         except Exception as e:
             network_logger.warning(f"Direct file transfer failed, falling back to chunked method: {e}")
             # Fall back to the chunked method below
-        
-        # If we reach here, direct transfer failed or was not attempted. Use chunked method
-        network_logger.info(f"Using chunked file transfer for {filename} to {destination_id}")
         
         # Show progress bar
         with tqdm(total=num_chunks, desc=f"Sending {filename}", unit="chunk") as pbar:
@@ -356,33 +308,15 @@ def send_file(destination_id, file_path):
             encrypted_data = encrypt_data(json_data)
             
             # Send file info
-            info_sent = False
-            for attempt in range(3):  # Retry sending info packet up to 3 times
-                if send_to_peer(next_hop, encrypted_data, retry=3):
-                    info_sent = True
-                    break
-                time.sleep(1)  # Wait between retries
-            
-            if not info_sent:
+            if not send_to_peer(next_hop, encrypted_data, retry=3):
                 network_logger.error(f"Failed to send file info to {destination_id}")
                 return False
             
-            # Wait for receiver to process the file info
-            time.sleep(1)
-            
-            # Send chunks with retries for individual chunks
+            # Send chunks
             success = True
-            chunks_sent = 0
-            
             with open(file_path, "rb") as f:
                 for chunk_index in range(num_chunks):
-                    # Read chunk from file
                     chunk_data = f.read(CHUNK_SIZE)
-                    
-                    # Break if we reach end of file unexpectedly
-                    if not chunk_data and chunk_index < num_chunks - 1:
-                        network_logger.warning(f"Reached end of file earlier than expected at chunk {chunk_index}/{num_chunks}")
-                        break
                     
                     # Base64 encode binary data for JSON
                     encoded_chunk = base64.b64encode(chunk_data).decode('utf-8')
@@ -405,46 +339,22 @@ def send_file(destination_id, file_path):
                     json_data = json.dumps(chunk_packet)
                     encrypted_data = encrypt_data(json_data)
                     
-                    # Try to send the chunk with multiple retries
-                    chunk_sent = False
-                    max_retries = 5  # More retries for reliable delivery
-                    
-                    for retry in range(max_retries):
-                        if send_to_peer(next_hop, encrypted_data, retry=2):
-                            chunk_sent = True
-                            chunks_sent += 1
-                            break
-                        
-                        network_logger.warning(f"Retry {retry+1}/{max_retries} for chunk {chunk_index}")
-                        time.sleep((retry + 1) * 0.5)  # Increasing backoff between retries
-                    
-                    if not chunk_sent:
-                        network_logger.error(f"Failed to send chunk {chunk_index} to {destination_id} after {max_retries} retries")
+                    # Send chunk with retry
+                    if not send_to_peer(next_hop, encrypted_data, retry=3):
+                        network_logger.error(f"Failed to send chunk {chunk_index} to {destination_id}")
                         success = False
                         break
                     
                     # Update progress
                     pbar.update(1)
                     
-                    # Log progress for large files
-                    if chunk_index % 10 == 0 or chunk_index == num_chunks - 1:
-                        network_logger.info(f"Sent chunk {chunk_index+1}/{num_chunks} to {destination_id}")
-                    
                     # Small delay to avoid overwhelming the network
-                    # The delay is proportional to the number of chunks to avoid excessive delays for small files
-                    if num_chunks > 50:
-                        time.sleep(0.1)  # Longer delay for large files
-                    else:
-                        time.sleep(0.05)  # Shorter delay for small files
+                    time.sleep(0.01)
             
             if success:
-                log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", 
-                                f"Size: {filesize} bytes, Sent {chunks_sent}/{num_chunks} chunks")
-                network_logger.info(f"Successfully sent all {chunks_sent} chunks of {filename} to {destination_id}")
+                log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
             else:
-                log_file_transfer(filename, MY_ID, destination_id, "FAILED", 
-                                f"Chunk transfer failed: sent only {chunks_sent}/{num_chunks} chunks")
-                network_logger.error(f"Failed to send complete file {filename} to {destination_id}")
+                log_file_transfer(filename, MY_ID, destination_id, "FAILED", "Chunk transfer failed")
             
             return success
     except Exception as e:
@@ -457,32 +367,17 @@ def forward_packet(packet, received_from):
         # Extract packet data
         packet_type = packet.get("type", "")
         source_id = packet.get("src", "")
+        ttl = packet.get("ttl", 0) - 1  # Decrement TTL
         
-        # Skip processing if it's from ourselves
-        if source_id == MY_ID:
+        # Skip forwarding if TTL expired or it's from us
+        if ttl <= 0 or source_id == MY_ID:
             return False
         
-        # Get and validate TTL
-        ttl = packet.get("ttl", 0)
-        if ttl <= 0:
-            network_logger.debug(f"Dropping packet with expired TTL: {ttl}")
-            return False
-            
-        # Decrement TTL for forwarding
-        ttl -= 1
+        # Update TTL in packet
         packet["ttl"] = ttl
         
-        # If TTL is now 0, don't forward further
-        if ttl <= 0:
-            network_logger.debug(f"Not forwarding packet - TTL would expire")
-            return False
-        
-        # Initialize hops list if not present
-        if "hops" not in packet and packet.get("multi_hop", False):
-            packet["hops"] = []
-            
         # Add ourselves to the hop list if this is a multi-hop packet
-        if packet.get("multi_hop", False) and "hops" in packet:
+        if packet.get("multi_hop") and "hops" in packet:
             if MY_ID not in packet["hops"]:
                 packet["hops"].append(MY_ID)
         
@@ -494,30 +389,18 @@ def forward_packet(packet, received_from):
             if dest_id == MY_ID:
                 return False
             
-            # Check if we've seen this message before to prevent loops
+            # Check if we've seen this message before
             message_id = packet.get("id", "")
-            if not message_id:
-                # Missing message ID, generate one to prevent loops
-                message_id = str(uuid.uuid4())
-                packet["id"] = message_id
-                
             if not router.should_forward_message(message_id, ttl):
-                network_logger.debug(f"Not forwarding message {message_id} - already seen")
                 return False
             
             # Get next hop
             next_hop = router.get_next_hop(dest_id)
-            if not next_hop:
-                network_logger.warning(f"No route to {dest_id} for message forwarding")
-                return False
             
             # Don't send back to where it came from
             if isinstance(next_hop, list):
                 if received_from in next_hop:
                     next_hop.remove(received_from)
-                if not next_hop:  # If removing received_from leaves an empty list
-                    network_logger.debug(f"No alternative routes for {dest_id} other than source {received_from}")
-                    return False
             elif next_hop == received_from:
                 # Check for alternative routes via bridge nodes
                 bridge_routes = []
@@ -532,35 +415,26 @@ def forward_packet(packet, received_from):
                     next_hop = bridge_routes
                 else:
                     # No alternative route
-                    network_logger.debug(f"No alternative routes to {dest_id} available")
                     return False
             
             # Forward packet
-            network_logger.debug(f"Forwarding message {message_id} to {dest_id} via {next_hop}, TTL: {ttl}")
-            
-            # Convert to JSON and encrypt
-            json_data = json.dumps(packet)
-            encrypted_data = encrypt_data(json_data)
-            
-            if isinstance(next_hop, list):
-                success = False
-                for ip in next_hop:
-                    if send_to_peer(ip, encrypted_data, retry=2):
-                        success = True
-                return success
-            else:
-                return send_to_peer(next_hop, encrypted_data, retry=2)
+            if next_hop:
+                json_data = json.dumps(packet)
+                encrypted_data = encrypt_data(json_data)
+                
+                if isinstance(next_hop, list):
+                    success = False
+                    for ip in next_hop:
+                        if send_to_peer(ip, encrypted_data, retry=2):
+                            success = True
+                    return success
+                else:
+                    return send_to_peer(next_hop, encrypted_data, retry=2)
         
         elif packet_type == "broadcast":
             # Check if we've seen this broadcast before
             message_id = packet.get("id", "")
-            if not message_id:
-                # Missing message ID, generate one
-                message_id = str(uuid.uuid4())
-                packet["id"] = message_id
-                
             if not router.should_forward_message(message_id, ttl):
-                network_logger.debug(f"Not forwarding broadcast {message_id} - already seen")
                 return False
             
             # Forward to all neighbors except the one we received from
@@ -568,21 +442,15 @@ def forward_packet(packet, received_from):
             if received_from in neighbors:
                 neighbors.remove(received_from)
             
-            if not neighbors:
-                network_logger.debug("No neighbors to forward broadcast to")
-                return False
+            if neighbors:
+                json_data = json.dumps(packet)
+                encrypted_data = encrypt_data(json_data)
                 
-            network_logger.debug(f"Forwarding broadcast {message_id} to {len(neighbors)} neighbors, TTL: {ttl}")
-            
-            # Convert to JSON and encrypt
-            json_data = json.dumps(packet)
-            encrypted_data = encrypt_data(json_data)
-            
-            success = False
-            for ip in neighbors:
-                if send_to_peer(ip, encrypted_data):
-                    success = True
-            return success
+                success = False
+                for ip in neighbors:
+                    if send_to_peer(ip, encrypted_data):
+                        success = True
+                return success
         
         elif packet_type in ["file_info", "file_chunk"]:
             dest_id = packet.get("dst", "")
@@ -593,17 +461,11 @@ def forward_packet(packet, received_from):
             
             # Get next hop
             next_hop = router.get_next_hop(dest_id)
-            if not next_hop:
-                network_logger.warning(f"No route to {dest_id} for file transfer forwarding")
-                return False
             
             # Don't send back to where it came from
             if isinstance(next_hop, list):
                 if received_from in next_hop:
                     next_hop.remove(received_from)
-                if not next_hop:  # If removing received_from leaves an empty list
-                    network_logger.debug(f"No alternative routes for file to {dest_id}")
-                    return False
                 
                 # For file transfers, pick the best node (prioritize bridge nodes)
                 bridge_ip = None
@@ -623,31 +485,22 @@ def forward_packet(packet, received_from):
                     return False
             elif next_hop == received_from:
                 # Check for alternative routes via bridge nodes
-                bridge_ip = None
                 for bridge_id in router.bridge_nodes:
                     if bridge_id in router.routing_table:
                         bridge_route = router.routing_table[bridge_id]
                         if bridge_route["next_hop"] != received_from:
-                            bridge_ip = bridge_route["next_hop"]
+                            next_hop = bridge_route["next_hop"]
                             break
-                
-                if bridge_ip:
-                    next_hop = bridge_ip
                 else:
                     # No alternative route
-                    network_logger.debug(f"No alternative routes for file to {dest_id}")
                     return False
             
-            # Forward packet with higher retry count for file transfers
-            network_logger.debug(f"Forwarding {packet_type} to {dest_id} via {next_hop}, TTL: {ttl}")
-            
-            # Convert to JSON and encrypt
-            json_data = json.dumps(packet)
-            encrypted_data = encrypt_data(json_data)
-            return send_to_peer(next_hop, encrypted_data, retry=3)
+            # Forward packet
+            if next_hop:
+                json_data = json.dumps(packet)
+                encrypted_data = encrypt_data(json_data)
+                return send_to_peer(next_hop, encrypted_data, retry=3)
         
-        # Unknown packet type
-        network_logger.warning(f"Unknown packet type for forwarding: {packet_type}")
         return False
         
     except Exception as e:
