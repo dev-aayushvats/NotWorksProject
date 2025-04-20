@@ -39,11 +39,8 @@ Before setting up the project, ensure you have the following installed:
 
 ## Project Setup
 
-1. **Clone the Repository**
-   ```bash
-   git clone <repository-url>
-   cd moblal_da_code/NotWorksProject
-   ```
+1. **Open the Repository Folder**
+
 
 2. **Open in Android Studio**
    - Launch Android Studio
@@ -121,25 +118,3 @@ Before setting up the project, ensure you have the following installed:
    - Enable hotspot from app
    - Wait for other devices to connect
    - Begin mesh networking
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Build Errors**
-   - Clean project: `Build → Clean Project`
-   - Invalidate caches: `File → Invalidate Caches`
-   - Update Gradle: Edit `gradle-wrapper.properties`
-
-2. **Installation Issues**
-   - Uninstall previous version
-   - Check USB debugging is enabled
-   - Verify APK signing
-
-3. **Runtime Issues**
-   - Check permissions
-   - Verify Wi-Fi is enabled
-   - Ensure hotspot is properly configured
-
-
- 
