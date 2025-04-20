@@ -24,10 +24,14 @@ def get_local_subnet():
         ip = s.getsockname()[0]
         s.close()
         
+        # Log the detected IP for debugging
+        routing_logger.info(f"Detected local IP: {ip}")
+        
         # For simplicity, assume a /24 subnet (most home networks)
         ip_parts = ip.split('.')
         subnet = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0/24"
         
+        routing_logger.info(f"Using subnet for scanning: {subnet}")
         return subnet
     except Exception as e:
         routing_logger.error(f"Failed to get subnet: {e}")
@@ -51,6 +55,7 @@ def discover_peers():
             ip_list.remove(MY_IP)
         
         routing_logger.info(f"Scanning subnet {subnet} ({len(ip_list)} hosts)")
+        routing_logger.info(f"My IP is {MY_IP}, will not scan self")
         
         # Track newly discovered peers
         new_peers = []
@@ -60,15 +65,19 @@ def discover_peers():
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(0.5)  # Short timeout for faster scanning
+                routing_logger.debug(f"Attempting to connect to {ip}:{PORT}")
                 result = s.connect_ex((ip, PORT))
                 s.close()
                 
                 if result == 0:  # Port is open
+                    routing_logger.info(f"Found open port on {ip}:{PORT}")
                     if ip not in KNOWN_PEERS:
                         with peers_lock:
                             KNOWN_PEERS.append(ip)
                             new_peers.append(ip)
                             log_routing(ip, "PEER_DISCOVERED")
+                else:
+                    routing_logger.debug(f"No response from {ip}:{PORT}, error code: {result}")
             except Exception as e:
                 routing_logger.debug(f"Scan error for {ip}: {e}")
         
@@ -99,6 +108,8 @@ def discover_peers():
             
             # Send an immediate routing update to announce to new peers
             broadcast_routing_update()
+        else:
+            routing_logger.info(f"No new peers discovered. Current peers: {', '.join(KNOWN_PEERS) if KNOWN_PEERS else 'None'}")
         
         return new_peers
     except Exception as e:
