@@ -15,10 +15,13 @@ from client.gateway_discovery import handle_gateway_update
 def handle_file_transfer(conn, addr):
     """Handle an incoming file transfer"""
     try:
+        # Create a local copy of the connection to avoid it being closed elsewhere
+        local_conn = conn
+        
         # First check if this is a direct file transfer with a header
         try:
             # Try to read the first 4 bytes which might be a length header
-            header_data = conn.recv(4)
+            header_data = local_conn.recv(4)
             if len(header_data) == 4:
                 # Extract data length from header
                 data_length = int.from_bytes(header_data, byteorder='big')
@@ -27,7 +30,7 @@ def handle_file_transfer(conn, addr):
                 marker_data = b''
                 remaining = data_length
                 while remaining > 0:
-                    chunk = conn.recv(min(remaining, 4096))
+                    chunk = local_conn.recv(min(remaining, 4096))
                     if not chunk:
                         break
                     marker_data += chunk
@@ -66,11 +69,15 @@ def handle_file_transfer(conn, addr):
                         total_received = 0
                         with open(temp_path, "wb") as f:
                             while True:
-                                chunk = conn.recv(8192)
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                                total_received += len(chunk)
+                                try:
+                                    chunk = local_conn.recv(8192)
+                                    if not chunk:
+                                        break
+                                    f.write(chunk)
+                                    total_received += len(chunk)
+                                except Exception as e:
+                                    network_logger.error(f"Error receiving direct file chunk: {e}")
+                                    # Don't break here, try to read more data if possible
                         
                         network_logger.info(f"Direct file transfer received from {addr[0]}: {total_received} bytes")
                         
@@ -88,11 +95,6 @@ def handle_file_transfer(conn, addr):
                         log_file_transfer(filename, source_id, MY_ID, "COMPLETED", 
                                          f"Size: {total_received} bytes, Saved to {dest_path}")
                         
-                        # Clean up connection
-                        try:
-                            conn.close()
-                        except:
-                            pass
                         return
                 except:
                     # Not a valid marker packet, continue with regular file transfer
@@ -126,14 +128,21 @@ def handle_file_transfer(conn, addr):
             # Continue reading the rest of the data
             while True:
                 try:
-                    chunk = conn.recv(4096)
+                    if local_conn is None:
+                        network_logger.warning("Connection is None, stopping file reception")
+                        break
+                        
+                    chunk = local_conn.recv(4096)
                     if not chunk:
                         break
                     f.write(chunk)
                     total_received += len(chunk)
                 except Exception as e:
                     network_logger.error(f"Error receiving file chunk: {e}")
-                    break
+                    # Don't break immediately, try next iteration
+                    # This makes the transfer more resilient to temporary errors
+                    if "not a socket" in str(e) or "Bad file descriptor" in str(e):
+                        break
         
         network_logger.info(f"File received from {addr[0]}: {total_received} bytes")
         
@@ -153,10 +162,13 @@ def handle_file_transfer(conn, addr):
         network_logger.error(f"Error handling file transfer from {addr}: {e}")
         
     finally:
+        # Only close the connection if we're the ones who should be closing it
+        # and if it hasn't been closed already
         if conn:
             try:
                 conn.close()
-            except:
+            except Exception as e:
+                network_logger.debug(f"Error closing connection: {e}")
                 pass
 
 def handle_packet(data, addr, conn=None):
