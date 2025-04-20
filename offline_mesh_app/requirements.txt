@@ -1,2 +1,4 @@
-pycryptodome
+pycryptodome>=3.15.0
 tk
+pillow>=9.5.0
+tqdm>=4.65.0 
