@@ -68,6 +68,7 @@ class FileCache:
         self.cache = OrderedDict()  # {file_id: {"chunks": {chunk_index: data}, "total_chunks": total, "filename": name, "timestamp": time}}
         self.max_size = max_size
         self.lock = threading.RLock()
+        self.files = {}  # Shorthand reference to files in cache
         
         # Create cache directory if it doesn't exist
         self.cache_dir = os.path.join(DOWNLOAD_DIR, "cache")
