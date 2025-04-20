@@ -20,13 +20,7 @@ A resilient peer-to-peer mesh network application for communication without trad
 
 ## Installation
 
-1. Clone the repository:
-   ```
-   git clone <repository_url>
-   cd offline_mesh_app
-   ```
-
-2. Install dependencies:
+1. Install dependencies:
    ```
    pip install -r requirements.txt
    ```
@@ -99,9 +93,6 @@ For optimal mesh networking, follow these steps:
   - Verify that port 5000 is not blocked
   - Check network/VPN settings that might interfere with direct connections
 
-## License
-
-[MIT License](LICENSE)
 
 ## Contributors
 
