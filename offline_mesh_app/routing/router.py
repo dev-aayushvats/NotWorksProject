@@ -271,12 +271,12 @@ class Router:
             
             for bridge_id in stale_bridges:
                 self.bridge_nodes.remove(bridge_id)
-                
+            
             # Update gateway nodes set
             stale_gateways = []
             for gateway_id in self.gateway_nodes:
                 if gateway_id not in self.routing_table and gateway_id not in self.secondary_routes:
-                    stale_gateways.remove(gateway_id)
+                    stale_gateways.append(gateway_id)
             
             for gateway_id in stale_gateways:
                 self.gateway_nodes.remove(gateway_id)

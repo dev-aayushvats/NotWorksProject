@@ -4,9 +4,10 @@ import threading
 import time
 import os
 from datetime import datetime
+import socket
 
 from client.sender import send_message, send_file, broadcast_message
-from config import MY_ID, MY_IP, KNOWN_PEERS, save_config, IS_HOTSPOT_HOST
+from config import MY_ID, MY_IP, KNOWN_PEERS, save_config, IS_HOTSPOT_HOST, PORT
 from routing.router import router
 from routing.cache import file_cache
 from utils.logger import get_message_history, gui_logger
@@ -386,20 +387,29 @@ Restart the application for changes to take effect."""
             self.transfers_tree.delete(item)
         
         # Get pending file transfers
-        pending_files = file_cache.get_pending_files()
-        
-        # Add file transfers to the table
-        for file_id, file_info in pending_files.items():
-            filename = file_info['filename']
-            progress = f"{int(file_info['progress'] * 100)}%"
-            total_chunks = file_info['total_chunks']
+        try:
+            pending_files = file_cache.get_pending_files()
             
-            self.transfers_tree.insert('', tk.END, values=(
-                filename,
-                "Receiving",
-                progress,
-                f"{total_chunks} chunks"
-            ))
+            # Add file transfers to the table
+            for file_id, file_info in pending_files.items():
+                filename = file_info['filename']
+                progress = f"{int(file_info['progress'] * 100)}%"
+                total_chunks = file_info['total_chunks']
+                received_chunks = int(file_info['progress'] * total_chunks)
+                
+                self.transfers_tree.insert('', tk.END, values=(
+                    filename,
+                    "Receiving",
+                    f"{received_chunks}/{total_chunks} ({progress})",
+                    f"{total_chunks} chunks"
+                ))
+            
+            # Add any active outgoing transfers
+            # This is just a placeholder for active transfers initiated by this node
+            # For a full implementation, we would need to track outgoing transfers in sender.py
+            
+        except Exception as e:
+            gui_logger.error(f"Error updating file transfers: {e}")
 
     def update_status_bar(self):
         """Update the status bar with current information"""
@@ -461,8 +471,30 @@ Restart the application for changes to take effect."""
             # Update progress bar
             self.progress_var.set(0)
             
+            # Get the total file size
+            file_size = os.path.getsize(file_path)
+            chunk_size = self.calculate_chunk_count(file_size)
+            
+            # Start a separate thread to update the progress bar while the transfer is ongoing
+            stop_progress_update = threading.Event()
+            
+            def update_progress():
+                # Poll the file_cache for status
+                file_name = os.path.basename(file_path)
+                while not stop_progress_update.is_set():
+                    # For transfers we're sending, we need a custom approach
+                    # Update based on elapsed time as a rough estimate
+                    self.progress_var.set(min(self.progress_var.get() + 2, 95))  # Cap at 95% until confirmed
+                    time.sleep(0.5)
+            
+            progress_thread = threading.Thread(target=update_progress, daemon=True)
+            progress_thread.start()
+            
             # Send the file
             result = send_file(destination, file_path)
+            
+            # Stop the progress update thread
+            stop_progress_update.set()
             
             # Update UI based on result
             if result:
@@ -476,6 +508,11 @@ Restart the application for changes to take effect."""
             gui_logger.error(f"Error in file transfer: {e}")
             self.show_error(f"File transfer error: {e}")
             self.progress_var.set(0)
+            
+    def calculate_chunk_count(self, file_size):
+        """Calculate the number of chunks for a file"""
+        from config import CHUNK_SIZE
+        return (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
 
     def open_downloads(self):
         """Open the downloads folder"""
@@ -527,23 +564,50 @@ Restart the application for changes to take effect."""
 
     def add_peer(self):
         """Manually add a peer to the known peers list"""
-        from config import KNOWN_PEERS, save_config
+        from config import KNOWN_PEERS, save_config, PORT
         
         peer_ip = self.peer_ip_var.get().strip()
         if not peer_ip:
             return
         
-        if peer_ip not in KNOWN_PEERS:
-            KNOWN_PEERS.append(peer_ip)
-            save_config()
-            self.show_info(f"Added peer {peer_ip}")
-            self.peer_ip_var.set("")
+        # First verify if we can connect to this peer
+        try:
+            # Show status
+            self.add_routing_log(f"Attempting to connect to {peer_ip}:{PORT}...")
             
-            # Trigger a routing update
-            from client.broadcast import broadcast_routing_update
-            threading.Thread(target=broadcast_routing_update, daemon=True).start()
-        else:
-            self.show_info(f"Peer {peer_ip} already in list")
+            # Create a socket and try to connect
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3)  # 3 second timeout
+            result = s.connect_ex((peer_ip, PORT))
+            s.close()
+            
+            if result == 0:  # Connection successful
+                # Add to known peers if not already there
+                if peer_ip not in KNOWN_PEERS:
+                    KNOWN_PEERS.append(peer_ip)
+                    save_config()
+                    
+                    # Add to neighbors
+                    router.neighbors.add(peer_ip)
+                    
+                    self.show_info(f"Successfully connected to peer {peer_ip}")
+                    self.peer_ip_var.set("")
+                    self.add_routing_log(f"Peer {peer_ip} added successfully")
+                    
+                    # Update the UI immediately
+                    self.update_peer_list()
+                    
+                    # Trigger a routing update
+                    from client.broadcast import broadcast_routing_update
+                    threading.Thread(target=broadcast_routing_update, daemon=True).start()
+                else:
+                    self.show_info(f"Peer {peer_ip} already in list")
+            else:
+                self.show_error(f"Could not connect to {peer_ip}:{PORT} (error: {result})")
+                self.add_routing_log(f"Connection to {peer_ip} failed with error code {result}")
+        except Exception as e:
+            self.show_error(f"Error connecting to peer: {e}")
+            self.add_routing_log(f"Connection error: {e}")
 
     def run_discovery(self):
         """Run network discovery"""
