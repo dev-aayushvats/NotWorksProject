@@ -195,7 +195,7 @@ def handle_client(client_socket, client_address):
     """Handle incoming client connection"""
     try:
         # Set a timeout to prevent hanging
-        client_socket.settimeout(10)
+        client_socket.settimeout(15)  # Increased timeout for larger messages
         
         # Buffer to collect data
         data_buffer = b""
@@ -203,51 +203,73 @@ def handle_client(client_socket, client_address):
         # First try to parse as a JSON packet
         try:
             # Receive data
+            start_time = time.time()
             while True:
-                data = client_socket.recv(4096)
-                if not data:
-                    break
-                
-                data_buffer += data
-                
-                # Try to extract complete JSON messages
                 try:
-                    # Decrypt the data
-                    decrypted_data = decrypt_data(data_buffer)
-                    packet = json.loads(decrypted_data)
+                    data = client_socket.recv(4096)
+                    if not data:
+                        # Connection closed normally
+                        break
                     
-                    # Record the sender IP for routing
-                    sender_ip = client_address[0]
+                    data_buffer += data
                     
-                    # Handle the message
-                    handle_message(packet, sender_ip)
-                    
-                    # Clear buffer after successful processing
-                    data_buffer = b""
-                    
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    # Could be incomplete data or binary file, continue receiving
-                    # Check if buffer is very large, might be a binary file
-                    if len(data_buffer) > 10240:  # 10KB
-                        # This is likely a binary file transfer
-                        network_logger.info(f"Large binary data detected from {client_address[0]}, treating as file transfer")
+                    # Try to extract complete JSON messages
+                    try:
+                        # Decrypt the data
+                        decrypted_data = decrypt_data(data_buffer)
+                        packet = json.loads(decrypted_data)
+                        
+                        # Record the sender IP for routing
+                        sender_ip = client_address[0]
+                        
+                        # Handle the message
+                        handle_message(packet, sender_ip)
+                        
+                        # Clear buffer after successful processing
+                        data_buffer = b""
+                        
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        # Could be incomplete data or binary file, continue receiving
+                        # Check if buffer is very large, might be a binary file
+                        if len(data_buffer) > 10240:  # 10KB
+                            # This is likely a binary file transfer
+                            network_logger.info(f"Large binary data detected from {client_address[0]}, treating as file transfer")
+                            handle_binary_file(data_buffer, client_socket, client_address)
+                            return
+                        
+                        # If we've been receiving for too long without valid data, assume binary file
+                        elapsed_time = time.time() - start_time
+                        if elapsed_time > 5 and len(data_buffer) > 1024:  # More than 5 seconds and some data
+                            network_logger.info(f"Long receive with {len(data_buffer)} bytes from {client_address[0]}, treating as file transfer")
+                            handle_binary_file(data_buffer, client_socket, client_address)
+                            return
+                except socket.timeout:
+                    # If we timed out while waiting for more data
+                    if data_buffer:
+                        network_logger.info(f"Timeout with {len(data_buffer)} bytes from {client_address[0]}, treating as file transfer")
                         handle_binary_file(data_buffer, client_socket, client_address)
                         return
+                    else:
+                        network_logger.warning(f"Connection from {client_address} timed out with no data")
+                        break
                         
-        except socket.timeout:
-            # If we got a timeout but have data, it might be a binary file
+        except Exception as e:
+            # If we encounter an error during receive, but have data, it might be a binary file
             if data_buffer:
-                network_logger.info(f"Timeout with {len(data_buffer)} bytes from {client_address[0]}, treating as file transfer")
+                network_logger.info(f"Error during receive, but have {len(data_buffer)} bytes from {client_address[0]}, treating as file transfer")
                 handle_binary_file(data_buffer, client_socket, client_address)
                 return
             else:
-                network_logger.warning(f"Connection from {client_address} timed out")
+                network_logger.error(f"Error handling connection from {client_address}: {e}")
                 
     except Exception as e:
         network_logger.error(f"Error handling connection from {client_address}: {e}")
         
     finally:
-        client_socket.close()
+        try:
+            client_socket.close()
+        except:
+            pass
 
 
 def handle_binary_file(initial_data, client_socket, client_address):
