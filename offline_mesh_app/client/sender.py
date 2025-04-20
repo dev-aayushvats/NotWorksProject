@@ -187,15 +187,20 @@ def send_file(destination_id, file_path):
         return False
     
     try:
-        # Generate a unique file ID
+        # Get file info
         file_id = str(uuid.uuid4())
         filename = os.path.basename(file_path)
         filesize = os.path.getsize(file_path)
+        num_chunks = 0
         
         # Calculate number of chunks
-        num_chunks = (filesize + CHUNK_SIZE - 1) // CHUNK_SIZE
+        with open(file_path, 'rb') as f:
+            chunk = f.read(CHUNK_SIZE)
+            while chunk:
+                num_chunks += 1
+                chunk = f.read(CHUNK_SIZE)
         
-        log_file_transfer(filename, MY_ID, destination_id, "STARTED", 
+        network_logger.info(f"Sending file {filename} to {destination_id}. " + 
                          f"Size: {filesize} bytes, Chunks: {num_chunks}")
         
         # Get next hop for destination
