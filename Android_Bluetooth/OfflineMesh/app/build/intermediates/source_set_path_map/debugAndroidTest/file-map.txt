@@ -1,0 +1,4 @@
+com.example.offlinemesh.test.app-androidTest-0 D:\Documents\OfflineMesh\OfflineMesh\app\build\generated\res\resValues\androidTest\debug
+com.example.offlinemesh.test.app-mergeDebugAndroidTestResources-1 D:\Documents\OfflineMesh\OfflineMesh\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\merged.dir
+com.example.offlinemesh.test.app-mergeDebugAndroidTestResources-2 D:\Documents\OfflineMesh\OfflineMesh\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\stripped.dir
+com.example.offlinemesh.test.app-merged_res-3 D:\Documents\OfflineMesh\OfflineMesh\app\build\intermediates\merged_res\debugAndroidTest

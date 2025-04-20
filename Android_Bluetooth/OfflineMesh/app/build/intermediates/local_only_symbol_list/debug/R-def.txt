@@ -1,0 +1,36 @@
+R_DEF: Internal format may change without notice
+local
+color purple_500
+color purple_700
+color white
+drawable received_message_bg
+drawable sent_message_bg
+id button_scan
+id chat_container
+id chat_title
+id connect_new_device_button
+id find_devices_btn
+id message_container
+id message_input
+id message_text
+id new_devices
+id paired_devices
+id root_layout
+id scroll_view
+id send_btn
+id title_new_devices
+id title_paired_devices
+layout activity_chat
+layout activity_device_list
+layout activity_main
+layout device_name
+layout message_bubble
+string app_name
+string button_scan
+string none_found
+string none_paired
+string scanning
+string select_device
+string title_other_devices
+string title_paired_devices
+style Theme.OfflineMesh
