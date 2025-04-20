@@ -226,7 +226,6 @@ def send_file(destination_id, file_path):
                 next_hop = next_hop[0] if next_hop else None
         
         # First option: Try sending the file directly over a socket (this is faster for one-hop transfers)
-        direct_transfer_attempted = False
         try:
             # Check if this is a direct connection (one hop)
             is_direct_connection = False
@@ -238,7 +237,6 @@ def send_file(destination_id, file_path):
             
             if is_direct_connection:
                 network_logger.info(f"Attempting direct file transfer to {destination_id} at {next_hop}")
-                direct_transfer_attempted = True
                 
                 # Send file info first with normal method (to prepare receiver)
                 info_packet = {
@@ -259,8 +257,7 @@ def send_file(destination_id, file_path):
                 encrypted_data = encrypt_data(json_data)
                 
                 # Send file info to prepare receiver
-                info_sent = send_to_peer(next_hop, encrypted_data, retry=3)
-                if not info_sent:
+                if not send_to_peer(next_hop, encrypted_data, retry=2):
                     network_logger.error(f"Failed to send file info to {destination_id}")
                     # Fall back to chunked method later
                 else:
@@ -270,57 +267,32 @@ def send_file(destination_id, file_path):
                     # Now send the actual file directly with binary transfer
                     # This is much faster for large files
                     try:
-                        # Retry direct file transfer up to 2 times
-                        for attempt in range(3):
-                            try:
-                                # Mark message as a direct file transfer
-                                marker_packet = {
-                                    "type": "direct_file_transfer",
-                                    "file_id": file_id,
-                                    "src": MY_ID,
-                                    "dst": destination_id,
-                                    "filename": filename,  # Add filename to marker packet for better identification
-                                    "filesize": filesize   # Add filesize to marker packet
-                                }
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.settimeout(10)  # Longer timeout for file transfer
+                        s.connect((next_hop, PORT))
+                        
+                        # Show progress bar
+                        bytes_sent = 0
+                        with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
+                            buffer_size = min(CHUNK_SIZE, 8192)  # Use smaller buffer to improve progress updates
+                            while True:
+                                chunk = f.read(buffer_size)
+                                if not chunk:
+                                    break
+                                s.sendall(chunk)
+                                bytes_sent += len(chunk)
+                                pbar.update(len(chunk))
                                 
-                                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                                s.settimeout(60)  # Longer timeout for file transfer
-                                s.connect((next_hop, PORT))
-                                
-                                # First send a small marker packet so receiver knows this is a direct transfer
-                                marker_json = json.dumps(marker_packet)
-                                marker_data = marker_json.encode('utf-8')
-                                header = len(marker_data).to_bytes(4, byteorder='big')
-                                s.sendall(header + marker_data)
-                                
-                                # Small delay to let receiver prepare
-                                time.sleep(0.3)
-                                
-                                # Now send the actual file
-                                bytes_sent = 0
-                                with open(file_path, "rb") as f, tqdm(total=filesize, desc=f"Sending {filename}", unit="B", unit_scale=True) as pbar:
-                                    while True:
-                                        chunk = f.read(CHUNK_SIZE)
-                                        if not chunk:
-                                            break
-                                        s.sendall(chunk)
-                                        bytes_sent += len(chunk)
-                                        pbar.update(len(chunk))
-                                        # Small pause between chunks
-                                        time.sleep(0.01)
-                                
-                                # Wait a bit to ensure all data is sent
-                                time.sleep(1.0)
-                                s.close()
-                                network_logger.info(f"Direct file transfer completed to {destination_id} - {bytes_sent}/{filesize} bytes sent")
-                                log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
-                                return True
-                            except Exception as e:
-                                if attempt < 2:  # If not last attempt
-                                    network_logger.warning(f"Direct file transfer attempt {attempt+1} failed: {e}. Retrying...")
-                                    time.sleep(1.0 * (attempt + 1))  # Increasing backoff
-                                else:
-                                    network_logger.error(f"Direct file transfer failed after {attempt+1} attempts: {e}")
+                                # For large files, log progress occasionally
+                                if bytes_sent % (1024 * 1024) == 0:  # Log every 1MB
+                                    network_logger.debug(f"Sent {bytes_sent // (1024*1024)}MB of {filesize // (1024*1024)}MB")
+                        
+                        # Wait for data to finish sending
+                        time.sleep(0.5)
+                        s.close()
+                        network_logger.info(f"Direct file transfer completed to {destination_id}, sent {bytes_sent} bytes")
+                        log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", f"Size: {filesize} bytes")
+                        return True
                     except Exception as e:
                         network_logger.error(f"Error in direct file transfer: {e}")
                         # Continue to chunked method
@@ -328,9 +300,8 @@ def send_file(destination_id, file_path):
             network_logger.warning(f"Direct file transfer failed, falling back to chunked method: {e}")
             # Fall back to the chunked method below
         
-        # If we're here, either direct transfer wasn't possible or it failed
-        if direct_transfer_attempted:
-            network_logger.info(f"Falling back to chunked file transfer method for {filename}")
+        # If we reach here, direct transfer failed or was not attempted. Use chunked method
+        network_logger.info(f"Using chunked file transfer for {filename} to {destination_id}")
         
         # Show progress bar
         with tqdm(total=num_chunks, desc=f"Sending {filename}", unit="chunk") as pbar:
@@ -353,16 +324,27 @@ def send_file(destination_id, file_path):
             encrypted_data = encrypt_data(json_data)
             
             # Send file info
-            if not send_to_peer(next_hop, encrypted_data, retry=3):
+            info_sent = False
+            for attempt in range(3):  # Retry sending info packet up to 3 times
+                if send_to_peer(next_hop, encrypted_data, retry=3):
+                    info_sent = True
+                    break
+                time.sleep(1)  # Wait between retries
+            
+            if not info_sent:
                 network_logger.error(f"Failed to send file info to {destination_id}")
                 return False
             
-            # Send chunks with pause between each chunk to prevent overwhelming the network
+            # Wait for receiver to process the file info
+            time.sleep(1)
+            
+            # Send chunks with retries for individual chunks
             success = True
             chunks_sent = 0
             
             with open(file_path, "rb") as f:
                 for chunk_index in range(num_chunks):
+                    # Read chunk from file
                     chunk_data = f.read(CHUNK_SIZE)
                     
                     # Base64 encode binary data for JSON
@@ -386,26 +368,46 @@ def send_file(destination_id, file_path):
                     json_data = json.dumps(chunk_packet)
                     encrypted_data = encrypt_data(json_data)
                     
-                    # Send chunk with retry
-                    if not send_to_peer(next_hop, encrypted_data, retry=3):
-                        network_logger.error(f"Failed to send chunk {chunk_index} to {destination_id}")
+                    # Try to send the chunk with multiple retries
+                    chunk_sent = False
+                    max_retries = 5  # More retries for reliable delivery
+                    
+                    for retry in range(max_retries):
+                        if send_to_peer(next_hop, encrypted_data, retry=2):
+                            chunk_sent = True
+                            chunks_sent += 1
+                            break
+                        
+                        network_logger.warning(f"Retry {retry+1}/{max_retries} for chunk {chunk_index}")
+                        time.sleep((retry + 1) * 0.5)  # Increasing backoff between retries
+                    
+                    if not chunk_sent:
+                        network_logger.error(f"Failed to send chunk {chunk_index} to {destination_id} after {max_retries} retries")
                         success = False
                         break
                     
-                    chunks_sent += 1
                     # Update progress
                     pbar.update(1)
                     
-                    # Increased delay between chunks to avoid overwhelming the network
-                    # This is especially important for large files
-                    time.sleep(0.05)
+                    # Log progress for large files
+                    if chunk_index % 10 == 0 or chunk_index == num_chunks - 1:
+                        network_logger.info(f"Sent chunk {chunk_index+1}/{num_chunks} to {destination_id}")
+                    
+                    # Small delay to avoid overwhelming the network
+                    # The delay is proportional to the number of chunks to avoid excessive delays for small files
+                    if num_chunks > 50:
+                        time.sleep(0.1)  # Longer delay for large files
+                    else:
+                        time.sleep(0.05)  # Shorter delay for small files
             
             if success:
                 log_file_transfer(filename, MY_ID, destination_id, "COMPLETED", 
-                                 f"Size: {filesize} bytes, Sent {chunks_sent}/{num_chunks} chunks")
+                                f"Size: {filesize} bytes, Sent {chunks_sent}/{num_chunks} chunks")
+                network_logger.info(f"Successfully sent all {chunks_sent} chunks of {filename} to {destination_id}")
             else:
                 log_file_transfer(filename, MY_ID, destination_id, "FAILED", 
-                                 f"Chunk transfer failed after {chunks_sent}/{num_chunks} chunks")
+                                f"Chunk transfer failed: sent only {chunks_sent}/{num_chunks} chunks")
+                network_logger.error(f"Failed to send complete file {filename} to {destination_id}")
             
             return success
     except Exception as e:

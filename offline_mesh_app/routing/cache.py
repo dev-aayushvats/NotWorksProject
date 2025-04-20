@@ -68,7 +68,6 @@ class FileCache:
         self.cache = OrderedDict()  # {file_id: {"chunks": {chunk_index: data}, "total_chunks": total, "filename": name, "timestamp": time}}
         self.max_size = max_size
         self.lock = threading.RLock()
-        self.files = {}  # Shorthand access to file entries
         
         # Create cache directory if it doesn't exist
         self.cache_dir = os.path.join(DOWNLOAD_DIR, "cache")
@@ -85,7 +84,8 @@ class FileCache:
                     "total_chunks": total_chunks,
                     "filename": filename,
                     "timestamp": time.time(),
-                    "received_chunks": 0
+                    "received_chunks": 0,
+                    "last_chunk_time": time.time()
                 }
                 # Update the files shorthand reference
                 self.files[file_id] = self.cache[file_id]
@@ -99,15 +99,29 @@ class FileCache:
                     # Remove from files shorthand
                     if oldest_id in self.files:
                         del self.files[oldest_id]
+                
+                log_routing(file_id, "FILE_CREATED", f"Created entry for {filename} with {total_chunks} chunks")
             
-            # Update the timestamp
+            # Update the timestamp and last chunk time
             self.cache[file_id]["timestamp"] = time.time()
+            self.cache[file_id]["last_chunk_time"] = time.time()
             self.cache.move_to_end(file_id)
+            
+            # Validate chunk index
+            if chunk_index < 0 or chunk_index >= self.cache[file_id]["total_chunks"]:
+                log_routing(file_id, "INVALID_CHUNK", f"Received invalid chunk index {chunk_index}, max is {self.cache[file_id]['total_chunks']-1}")
+                return False
             
             # Skip if we already have this chunk
             if chunk_index in self.cache[file_id]["chunks"]:
                 log_routing(file_id, "DUPLICATE_CHUNK", f"Received duplicate chunk {chunk_index}")
+                # Check if file is complete despite receiving a duplicate
                 return self.is_file_complete(file_id)
+            
+            # Validate the chunk data
+            if not chunk_data:
+                log_routing(file_id, "EMPTY_CHUNK", f"Received empty chunk {chunk_index}")
+                return False
             
             # Add the chunk
             try:
@@ -117,10 +131,15 @@ class FileCache:
                 # Update files shorthand
                 self.files[file_id] = self.cache[file_id]
                 
-                # Log progress periodically
-                if self.cache[file_id]["received_chunks"] % 5 == 0 or self.cache[file_id]["received_chunks"] == self.cache[file_id]["total_chunks"]:
+                # Calculate progress percentage
+                progress = (self.cache[file_id]["received_chunks"] / self.cache[file_id]["total_chunks"]) * 100
+                
+                # Log progress at regular intervals
+                if (self.cache[file_id]["received_chunks"] % 5 == 0 or 
+                    self.cache[file_id]["received_chunks"] == self.cache[file_id]["total_chunks"] or
+                    self.cache[file_id]["received_chunks"] == 1):
                     log_routing(file_id, "FILE_PROGRESS", 
-                              f"Received {self.cache[file_id]['received_chunks']}/{self.cache[file_id]['total_chunks']} chunks")
+                              f"Received {self.cache[file_id]['received_chunks']}/{self.cache[file_id]['total_chunks']} chunks ({progress:.1f}%)")
             except Exception as e:
                 log_routing(file_id, "CHUNK_ERROR", f"Error adding chunk {chunk_index}: {e}")
                 return False
@@ -148,33 +167,7 @@ class FileCache:
                 return False
             
             file_data = self.cache[file_id]
-            
-            # Check if we have all chunks
-            if len(file_data["chunks"]) != file_data["total_chunks"]:
-                return False
-                
-            # Verify that all chunk indices are present
-            for i in range(file_data["total_chunks"]):
-                if i not in file_data["chunks"]:
-                    log_routing(file_id, "MISSING_CHUNK", f"Missing chunk {i}")
-                    return False
-            
-            return True
-    
-    def get_missing_chunks(self, file_id):
-        """Get a list of missing chunk indices for a file"""
-        with self.lock:
-            if file_id not in self.cache:
-                return []
-                
-            file_data = self.cache[file_id]
-            missing = []
-            
-            for i in range(file_data["total_chunks"]):
-                if i not in file_data["chunks"]:
-                    missing.append(i)
-                    
-            return missing
+            return len(file_data["chunks"]) == file_data["total_chunks"]
     
     def save_complete_file(self, file_id):
         """Save a complete file to disk"""
@@ -182,15 +175,17 @@ class FileCache:
             if file_id not in self.cache:
                 log_routing(file_id, "FILE_SAVE_ERROR", "File not found in cache")
                 return None
-                
+            
             if not self.is_file_complete(file_id):
                 missing = self.get_missing_chunks(file_id)
+                missing_count = len(missing)
                 log_routing(file_id, "FILE_INCOMPLETE", 
-                          f"Cannot save incomplete file. Missing chunks: {missing[:5]}...")
+                          f"Cannot save incomplete file. Missing {missing_count} chunks. First few missing: {missing[:5]}...")
                 return None
             
             file_data = self.cache[file_id]
             filename = file_data["filename"]
+            total_chunks = file_data["total_chunks"]
             
             # Create a safe filename (avoid path traversal)
             safe_filename = os.path.basename(filename)
@@ -203,14 +198,30 @@ class FileCache:
             
             # Ensure download directory exists
             if not os.path.exists(DOWNLOAD_DIR):
-                os.makedirs(DOWNLOAD_DIR)
+                try:
+                    os.makedirs(DOWNLOAD_DIR)
+                except Exception as e:
+                    log_routing(file_id, "DIR_CREATE_ERROR", f"Failed to create download directory: {e}")
+                    return None
                 
+            # Create a temporary file first, then move to final location
+            temp_dir = os.path.join(DOWNLOAD_DIR, "temp")
+            if not os.path.exists(temp_dir):
+                try:
+                    os.makedirs(temp_dir)
+                except Exception as e:
+                    log_routing(file_id, "DIR_CREATE_ERROR", f"Failed to create temp directory: {e}")
+                    return None
+                
+            temp_path = os.path.join(temp_dir, f"temp_{file_id}_{timestamp}")
             output_path = os.path.join(DOWNLOAD_DIR, new_filename)
             
             try:
-                # Combine chunks in order
-                with open(output_path, "wb") as f:
-                    for i in range(file_data["total_chunks"]):
+                # Combine chunks in order, writing to temporary file first
+                log_routing(file_id, "FILE_SAVING", f"Saving {total_chunks} chunks to {new_filename}")
+                
+                with open(temp_path, "wb") as f:
+                    for i in range(total_chunks):
                         if i not in file_data["chunks"]:
                             raise ValueError(f"Missing chunk {i} when saving file {filename}")
                         
@@ -223,7 +234,26 @@ class FileCache:
                                 # If decoding fails, try using it as-is
                                 log_routing(file_id, "CHUNK_DECODE_ERROR", f"Error decoding chunk {i}: {e}")
                                 chunk = chunk.encode() if isinstance(chunk, str) else chunk
-                        f.write(chunk)
+                        
+                        # Write chunk to file
+                        try:
+                            f.write(chunk)
+                        except Exception as e:
+                            raise IOError(f"Error writing chunk {i} to file: {e}")
+                
+                # Move from temp location to final location
+                import shutil
+                try:
+                    shutil.move(temp_path, output_path)
+                except Exception as e:
+                    log_routing(file_id, "FILE_MOVE_ERROR", f"Error moving file from temp location: {e}")
+                    # Try to copy instead of move if move fails
+                    try:
+                        shutil.copy2(temp_path, output_path)
+                        os.remove(temp_path)
+                    except Exception as e2:
+                        log_routing(file_id, "FILE_COPY_ERROR", f"Error copying file: {e2}")
+                        return None
                 
                 # Log success
                 log_routing(file_id, "FILE_SAVED", f"Saved to {output_path}")
@@ -235,8 +265,20 @@ class FileCache:
                 
                 return output_path
                 
+            except ValueError as e:
+                log_routing(file_id, "FILE_SAVE_ERROR", f"Error saving file - missing chunks: {e}")
+                return None
+            except IOError as e:
+                log_routing(file_id, "FILE_SAVE_ERROR", f"Error writing to file: {e}")
+                return None
             except Exception as e:
                 log_routing(file_id, "FILE_SAVE_ERROR", f"Error saving file: {e}")
+                # Try to clean up temp file if it exists
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                except:
+                    pass
                 return None
     
     def _cleanup_file(self, file_id):
@@ -253,16 +295,10 @@ class FileCache:
         with self.lock:
             pending = {}
             for file_id, file_data in self.cache.items():
-                received = len(file_data["chunks"])
-                total = file_data["total_chunks"]
-                progress = (received / total) if total > 0 else 0
-                
                 pending[file_id] = {
                     "filename": file_data["filename"],
-                    "progress": progress,
-                    "received_chunks": received,
-                    "total_chunks": total,
-                    "missing_chunks": self.get_missing_chunks(file_id)[:10]  # Show just first 10 missing chunks
+                    "progress": len(file_data["chunks"]) / file_data["total_chunks"],
+                    "total_chunks": file_data["total_chunks"]
                 }
             return pending
     
@@ -279,10 +315,32 @@ class FileCache:
             for file_id in to_remove:
                 self._cleanup_file(file_id)
                 del self.cache[file_id]
-                if file_id in self.files:
-                    del self.files[file_id]
             
             return len(to_remove)
+
+    def has_file(self, file_id):
+        """Check if a file exists in the cache"""
+        with self.lock:
+            return file_id in self.cache
+
+    def initialize_file(self, file_id, filename, total_chunks):
+        """Initialize a file entry in the cache"""
+        with self.lock:
+            if file_id not in self.cache:
+                self.cache[file_id] = {
+                    "chunks": {},
+                    "total_chunks": total_chunks,
+                    "filename": filename,
+                    "timestamp": time.time(),
+                    "received_chunks": 0
+                }
+                # Update the files shorthand reference
+                self.files[file_id] = self.cache[file_id]
+                self.cache.move_to_end(file_id)
+                
+                log_routing(file_id, "FILE_INITIALIZED", f"File {filename} with {total_chunks} chunks")
+                return True
+            return False
 
 
 # Create global instances
